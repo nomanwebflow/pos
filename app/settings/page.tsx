@@ -1,0 +1,592 @@
+"use client"
+
+import { useState, useEffect } from "react"
+import { AppSidebar } from "@/components/app-sidebar"
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar"
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb"
+import { Separator } from "@/components/ui/separator"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Field,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
+import {
+  Settings as SettingsIcon,
+  Building,
+  Users,
+  DollarSign,
+  Save,
+  Plus,
+  Edit,
+  Trash2,
+} from "lucide-react"
+
+interface Business {
+  id: string
+  name: string
+  address: string | null
+  phone: string | null
+  email: string | null
+  taxNumber: string | null
+  currency: string
+  taxRate: number
+}
+
+interface User {
+  id: string
+  email: string
+  name: string
+  role: string
+  isActive: boolean
+}
+
+export default function SettingsPage() {
+  const [business, setBusiness] = useState<Business | null>(null)
+  const [users, setUsers] = useState<User[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [isUserDialogOpen, setIsUserDialogOpen] = useState(false)
+  const [editingUser, setEditingUser] = useState<User | null>(null)
+
+  const [businessForm, setBusinessForm] = useState({
+    name: "",
+    address: "",
+    phone: "",
+    email: "",
+    taxNumber: "",
+    currency: "MUR",
+    taxRate: "15",
+  })
+
+  const [userForm, setUserForm] = useState({
+    email: "",
+    name: "",
+    password: "",
+    role: "SELLER",
+  })
+
+  useEffect(() => {
+    loadSettings()
+      loadUsers()
+  }, [])
+
+  const loadSettings = async () => {
+    try {
+      const res = await fetch("/api/settings")
+      if (res.ok) {
+        const data = await res.json()
+        setBusiness(data.business)
+        setBusinessForm({
+          name: data.business.name || "",
+          address: data.business.address || "",
+          phone: data.business.phone || "",
+          email: data.business.email || "",
+          taxNumber: data.business.taxNumber || "",
+          currency: data.business.currency || "MUR",
+          taxRate: data.business.taxRate?.toString() || "15",
+        })
+      }
+    } catch (error) {
+      console.error("Error loading settings:", error)
+    }
+  }
+
+  const loadUsers = async () => {
+    try {
+      const res = await fetch("/api/users")
+      if (res.ok) {
+        const data = await res.json()
+        setUsers(data)
+      }
+    } catch (error) {
+      console.error("Error loading users:", error)
+    }
+  }
+
+  const handleBusinessSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsLoading(true)
+
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: businessForm.name,
+          address: businessForm.address || null,
+          phone: businessForm.phone || null,
+          email: businessForm.email || null,
+          taxNumber: businessForm.taxNumber || null,
+          currency: businessForm.currency,
+          taxRate: parseFloat(businessForm.taxRate),
+        })
+      })
+
+      if (res.ok) {
+        loadSettings()
+        alert("Business settings updated successfully!")
+      } else {
+        alert("Error updating settings")
+      }
+    } catch (error) {
+      console.error("Error updating settings:", error)
+      alert("Error updating settings")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsLoading(true)
+
+    try {
+      if (editingUser) {
+        // Update existing user
+        const res = await fetch("/api/users", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: editingUser.id,
+            name: userForm.name,
+            role: userForm.role,
+          })
+        })
+
+        if (res.ok) {
+          setIsUserDialogOpen(false)
+          loadUsers()
+          setEditingUser(null)
+          setUserForm({ email: "", name: "", password: "", role: "SELLER" })
+        } else {
+          alert("Error updating user")
+        }
+      } else {
+        // Create new user
+        const res = await fetch("/api/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(userForm)
+        })
+
+        if (res.ok) {
+          setIsUserDialogOpen(false)
+          loadUsers()
+          setUserForm({ email: "", name: "", password: "", role: "SELLER" })
+        } else {
+          const error = await res.json()
+          alert(error.error || "Error creating user")
+        }
+      }
+    } catch (error) {
+      console.error("Error with user:", error)
+      alert("Error with user operation")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleEditUser = (user: User) => {
+    setEditingUser(user)
+    setUserForm({
+      email: user.email,
+      name: user.name,
+      password: "",
+      role: user.role,
+    })
+    setIsUserDialogOpen(true)
+  }
+
+  const handleDeleteUser = async (userId: string) => {
+    if (!confirm("Are you sure you want to deactivate this user?")) return
+
+    try {
+      const res = await fetch(`/api/users?id=${userId}`, {
+        method: "DELETE"
+      })
+
+      if (res.ok) {
+        loadUsers()
+      } else {
+        alert("Error deactivating user")
+      }
+    } catch (error) {
+      console.error("Error deactivating user:", error)
+      alert("Error deactivating user")
+    }
+  }
+
+  // Check permissions
+  const canManageSettings = true // Auth removed
+  const canManageUsers = true // Auth removed
+
+  if (!canManageSettings) {
+    return (
+      <SidebarProvider>
+        <AppSidebar />
+        <SidebarInset>
+          <div className="flex h-screen items-center justify-center">
+            <Card>
+              <CardHeader>
+                <CardTitle>Access Denied</CardTitle>
+                <CardDescription>You don't have permission to access settings</CardDescription>
+              </CardHeader>
+            </Card>
+          </div>
+        </SidebarInset>
+      </SidebarProvider>
+    )
+  }
+
+  return (
+    <SidebarProvider>
+      <AppSidebar />
+      <SidebarInset>
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b">
+          <div className="flex items-center gap-2 px-3">
+            <SidebarTrigger />
+            <Separator orientation="vertical" className="mr-2 h-4" />
+            <Breadcrumb>
+              <BreadcrumbList>
+                <BreadcrumbItem className="hidden md:block">
+                  <BreadcrumbLink href="/">Dashboard</BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator className="hidden md:block" />
+                <BreadcrumbItem>
+                  <BreadcrumbPage>Settings</BreadcrumbPage>
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumb>
+          </div>
+        </header>
+
+        <div className="flex flex-1 flex-col gap-4 p-4">
+          {/* Business Information */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Building className="h-5 w-5" />
+                <CardTitle>Business Information</CardTitle>
+              </div>
+              <CardDescription>
+                Update your business details and tax information
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleBusinessSubmit}>
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel htmlFor="businessName">Business Name *</FieldLabel>
+                    <Input
+                      id="businessName"
+                      value={businessForm.name}
+                      onChange={(e) => setBusinessForm({ ...businessForm, name: e.target.value })}
+                      required
+                    />
+                  </Field>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field>
+                      <FieldLabel htmlFor="phone">Phone</FieldLabel>
+                      <Input
+                        id="phone"
+                        value={businessForm.phone}
+                        onChange={(e) => setBusinessForm({ ...businessForm, phone: e.target.value })}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="email">Email</FieldLabel>
+                      <Input
+                        id="email"
+                        type="email"
+                        value={businessForm.email}
+                        onChange={(e) => setBusinessForm({ ...businessForm, email: e.target.value })}
+                      />
+                    </Field>
+                  </div>
+
+                  <Field>
+                    <FieldLabel htmlFor="address">Address</FieldLabel>
+                    <Input
+                      id="address"
+                      value={businessForm.address}
+                      onChange={(e) => setBusinessForm({ ...businessForm, address: e.target.value })}
+                    />
+                  </Field>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field>
+                      <FieldLabel htmlFor="taxNumber">Tax Number (BRN)</FieldLabel>
+                      <Input
+                        id="taxNumber"
+                        value={businessForm.taxNumber}
+                        onChange={(e) => setBusinessForm({ ...businessForm, taxNumber: e.target.value })}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="currency">Currency</FieldLabel>
+                      <Select
+                        value={businessForm.currency}
+                        onValueChange={(value) => setBusinessForm({ ...businessForm, currency: value })}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="MUR">MUR - Mauritian Rupee</SelectItem>
+                          <SelectItem value="USD">USD - US Dollar</SelectItem>
+                          <SelectItem value="EUR">EUR - Euro</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </div>
+
+                  <Field>
+                    <FieldLabel htmlFor="taxRate">Tax Rate (VAT %)</FieldLabel>
+                    <Input
+                      id="taxRate"
+                      type="number"
+                      step="0.1"
+                      value={businessForm.taxRate}
+                      onChange={(e) => setBusinessForm({ ...businessForm, taxRate: e.target.value })}
+                      required
+                    />
+                  </Field>
+                </FieldGroup>
+
+                <Button type="submit" disabled={isLoading} className="mt-4">
+                  <Save className="mr-2 h-4 w-4" />
+                  {isLoading ? "Saving..." : "Save Changes"}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+
+          {/* User Management */}
+          {canManageUsers && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Users className="h-5 w-5" />
+                    <div>
+                      <CardTitle>User Management</CardTitle>
+                      <CardDescription>Manage system users and their roles</CardDescription>
+                    </div>
+                  </div>
+                  <Button onClick={() => {
+                    setEditingUser(null)
+                    setUserForm({ email: "", name: "", password: "", role: "SELLER" })
+                    setIsUserDialogOpen(true)
+                  }}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add User
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Role</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {users.map((user) => (
+                      <TableRow key={user.id}>
+                        <TableCell className="font-medium">{user.name}</TableCell>
+                        <TableCell>{user.email}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{user.role}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={user.isActive ? "default" : "secondary"}>
+                            {user.isActive ? "Active" : "Inactive"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex gap-2 justify-end">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleEditUser(user)}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleDeleteUser(user.id)}
+                              disabled={false}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* System Information */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <SettingsIcon className="h-5 w-5" />
+                <CardTitle>System Information</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="text-muted-foreground">Current User</p>
+                  <p className="font-medium">System User</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Role</p>
+                  <p className="font-medium">Admin</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Business ID</p>
+                  <p className="font-mono text-xs">1</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </SidebarInset>
+
+      {/* User Dialog */}
+      <Dialog open={isUserDialogOpen} onOpenChange={setIsUserDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingUser ? "Edit User" : "Add New User"}</DialogTitle>
+            <DialogDescription>
+              {editingUser ? "Update user details and role" : "Create a new user account"}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleUserSubmit}>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="userName">Name *</FieldLabel>
+                <Input
+                  id="userName"
+                  value={userForm.name}
+                  onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
+                  required
+                />
+              </Field>
+
+              <Field>
+                <FieldLabel htmlFor="userEmail">Email *</FieldLabel>
+                <Input
+                  id="userEmail"
+                  type="email"
+                  value={userForm.email}
+                  onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
+                  required
+                  disabled={!!editingUser}
+                />
+              </Field>
+
+              {!editingUser && (
+                <Field>
+                  <FieldLabel htmlFor="userPassword">Password *</FieldLabel>
+                  <Input
+                    id="userPassword"
+                    type="password"
+                    value={userForm.password}
+                    onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
+                    required
+                  />
+                </Field>
+              )}
+
+              <Field>
+                <FieldLabel htmlFor="userRole">Role *</FieldLabel>
+                <Select
+                  value={userForm.role}
+                  onValueChange={(value) => setUserForm({ ...userForm, role: value })}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="SELLER">Seller</SelectItem>
+                    <SelectItem value="STOCK_MANAGER">Stock Manager</SelectItem>
+                    <SelectItem value="FINANCE">Finance</SelectItem>
+                    <SelectItem value="OWNER">Owner</SelectItem>
+                    {true && (
+                      <SelectItem value="SUPER_ADMIN">Super Admin</SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </FieldGroup>
+
+            <DialogFooter className="mt-4">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setIsUserDialogOpen(false)
+                  setEditingUser(null)
+                  setUserForm({ email: "", name: "", password: "", role: "SELLER" })
+                }}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isLoading}>
+                {isLoading ? "Saving..." : editingUser ? "Update User" : "Create User"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </SidebarProvider>
+  )
+}

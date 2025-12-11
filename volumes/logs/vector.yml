@@ -1,0 +1,105 @@
+#                                    __   __  __
+#                                    \ \ / / / /
+#                                     \ V / / /
+#                                      \_/  \/
+#
+#                                    V E C T O R
+#                                   Configuration
+#
+# ------------------------------------------------------------------------------
+# Website: https://vector.dev
+# Docs: https://vector.dev/docs
+# Chat: https://chat.vector.dev
+# ------------------------------------------------------------------------------
+
+# Sources - where Vector gets data from
+sources:
+  docker_host:
+    type: docker_logs
+
+  # Collect logs from all Supabase services
+  postgres:
+    type: docker_logs
+    docker_host: unix:///var/run/docker.sock
+    include_containers:
+      - supabase-db
+
+  auth:
+    type: docker_logs
+    docker_host: unix:///var/run/docker.sock
+    include_containers:
+      - supabase-auth
+
+  rest:
+    type: docker_logs
+    docker_host: unix:///var/run/docker.sock
+    include_containers:
+      - supabase-rest
+
+  realtime:
+    type: docker_logs
+    docker_host: unix:///var/run/docker.sock
+    include_containers:
+      - supabase-realtime
+
+  storage:
+    type: docker_logs
+    docker_host: unix:///var/run/docker.sock
+    include_containers:
+      - supabase-storage
+
+  kong:
+    type: docker_logs
+    docker_host: unix:///var/run/docker.sock
+    include_containers:
+      - supabase-kong
+
+# Transforms - process and enrich log data
+transforms:
+  # Parse JSON logs
+  parse_logs:
+    type: remap
+    inputs:
+      - postgres
+      - auth
+      - rest
+      - realtime
+      - storage
+      - kong
+    source: |
+      . = parse_json!(.message) ?? .
+      .timestamp = now()
+
+  # Add metadata
+  add_metadata:
+    type: remap
+    inputs:
+      - parse_logs
+    source: |
+      .environment = get_env_var("ENVIRONMENT") ?? "production"
+      .project = "pos-system"
+
+# Sinks - where Vector sends data to
+sinks:
+  # Send to Logflare (analytics)
+  logflare:
+    type: http
+    inputs:
+      - add_metadata
+    uri: http://analytics:4000/api/logs
+    encoding:
+      codec: json
+    auth:
+      strategy: bearer
+      token: "${LOGFLARE_API_KEY}"
+    batch:
+      max_bytes: 10485760
+      timeout_secs: 1
+
+  # Also output to console for debugging
+  console:
+    type: console
+    inputs:
+      - add_metadata
+    encoding:
+      codec: json

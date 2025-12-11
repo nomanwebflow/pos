@@ -1,0 +1,36 @@
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/pos-system', '.']
+  # Push the container image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/pos-system']
+  # Deploy container image to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'pos-system'
+      - '--image'
+      - 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/pos-system'
+      - '--region'
+      - 'asia-southeast1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--memory'
+      - '1Gi'
+      - '--cpu'
+      - '1'
+      - '--min-instances'
+      - '0'
+      - '--max-instances'
+      - '10'
+      - '--timeout'
+      - '300'
+      - '--set-env-vars'
+      - 'DATABASE_URL=libsql://pos-production-thewebflowguy.aws-ap-northeast-1.turso.io,TURSO_AUTH_TOKEN=eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NjUzMDI5MjAsImlkIjoiNDI2NTJjMTQtMWQ1ZC00M2RhLWFlZTEtOWVkN2ExMTk0ZDNlIiwicmlkIjoiZWU4ZDIwYWYtOWM5NS00ZTQ0LTg1Y2UtMGQ4YWFmMTE5MjJmIn0.H5zOFEpPd3222Ej1KL9AQhFPI_vWnTSKvZ1mqjUEOl_8g0owb806JZbsqPeYdD496Khth-I1u70FLtgYJ4KwDw,NODE_ENV=production'
+images:
+  - 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/pos-system'
+timeout: 1200s

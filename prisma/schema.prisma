@@ -1,0 +1,205 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// User Roles: SUPER_ADMIN, SELLER, STOCK_MANAGER, FINANCE, OWNER
+enum UserRole {
+  SUPER_ADMIN
+  SELLER
+  STOCK_MANAGER
+  FINANCE
+  OWNER
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  MIXED
+}
+
+enum StockMovementType {
+  SALE
+  REFILL
+  ADJUSTMENT
+}
+
+// Business/Store Configuration
+model Business {
+  id          String   @id @default(cuid())
+  name        String
+  address     String?
+  phone       String?
+  email       String?
+  taxNumber   String?
+  currency    String   @default("MUR")
+  taxRate     Float    @default(15.0) // VAT for Mauritius
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       User[]
+  products    Product[]
+  productCategories ProductCategory[]
+  sales       Sale[]
+  customers   Customer[]
+  settings    Settings[]
+}
+
+// User Management
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String
+  password      String
+  role          UserRole  @default(SELLER)
+  isActive      Boolean   @default(true)
+  businessId    String
+  business      Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sales         Sale[]
+  stockMovements StockMovement[]
+  auditLogs     AuditLog[]
+}
+
+// Product Categories
+model ProductCategory {
+  id          String    @id @default(cuid())
+  name        String
+  description String?
+  isActive    Boolean   @default(true)
+  businessId  String
+  business    Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([businessId, name])
+}
+
+// Product & Inventory
+model Product {
+  id              String    @id @default(cuid())
+  name            String
+  sku             String    @unique
+  barcode         String?   @unique
+  description     String?
+  category        String?
+  costPrice       Float?
+  sellingPrice    Float
+  stockLevel      Int       @default(0)
+  lowStockThreshold Int     @default(10)
+  taxable         Boolean   @default(true)
+  isActive        Boolean   @default(true)
+  businessId      String
+  business        Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  saleItems       SaleItem[]
+  stockMovements  StockMovement[]
+}
+
+// Customer Management
+model Customer {
+  id              String    @id @default(cuid())
+  name            String
+  email           String?
+  phone           String?
+  address         String?
+  taxNumber       String?
+  notes           String?
+  isActive        Boolean   @default(true)
+  businessId      String
+  business        Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  sales           Sale[]
+}
+
+// Sales Transaction
+model Sale {
+  id              String        @id @default(cuid())
+  saleNumber      String        @unique
+  subtotal        Float
+  taxAmount       Float
+  discount        Float         @default(0)
+  total           Float
+  paymentMethod   PaymentMethod
+  cashReceived    Float?
+  cashChange      Float?
+  cardAmount      Float?
+  notes           String?
+  customerId      String?
+  customer        Customer?     @relation(fields: [customerId], references: [id])
+  userId          String
+  user            User          @relation(fields: [userId], references: [id])
+  businessId      String
+  business        Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  createdAt       DateTime      @default(now())
+
+  saleItems       SaleItem[]
+}
+
+// Sale Line Items
+model SaleItem {
+  id              String   @id @default(cuid())
+  saleId          String
+  sale            Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id])
+  quantity        Int
+  unitPrice       Float
+  subtotal        Float
+  taxAmount       Float
+  total           Float
+  createdAt       DateTime @default(now())
+}
+
+// Stock Movement Tracking
+model StockMovement {
+  id              String            @id @default(cuid())
+  type            StockMovementType
+  productId       String
+  product         Product           @relation(fields: [productId], references: [id])
+  quantity        Int
+  previousStock   Int
+  newStock        Int
+  reference       String?           // Reference number for refills/adjustments
+  reason          String?           // Required for adjustments
+  userId          String
+  user            User              @relation(fields: [userId], references: [id])
+  createdAt       DateTime          @default(now())
+}
+
+// Settings
+model Settings {
+  id              String   @id @default(cuid())
+  key             String
+  value           String
+  businessId      String
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([businessId, key])
+}
+
+// Audit Log for tracking actions
+model AuditLog {
+  id              String   @id @default(cuid())
+  action          String
+  entity          String
+  entityId        String
+  details         String?
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  createdAt       DateTime @default(now())
+}
