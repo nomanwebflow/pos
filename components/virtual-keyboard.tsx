@@ -7,9 +7,10 @@ interface VirtualKeyboardProps {
   onKeyPress: (value: string) => void
   onBackspace: () => void
   onClear: () => void
+  onRefund?: () => void
 }
 
-export function VirtualKeyboard({ onKeyPress, onBackspace, onClear }: VirtualKeyboardProps) {
+export function VirtualKeyboard({ onKeyPress, onBackspace, onClear, onRefund }: VirtualKeyboardProps) {
   const keys = [
     ["1", "2", "3"],
     ["4", "5", "6"],
@@ -43,15 +44,28 @@ export function VirtualKeyboard({ onKeyPress, onBackspace, onClear }: VirtualKey
           ))}
         </div>
       ))}
-      <Button
-        type="button"
-        variant="secondary"
-        size="lg"
-        className="h-14 w-full text-lg font-semibold"
-        onClick={onClear}
-      >
-        Clear
-      </Button>
+      <div className="flex gap-2">
+        {onRefund && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="lg"
+            className="h-14 flex-1 text-lg font-semibold bg-orange-100 hover:bg-orange-200 text-orange-900 border-orange-200"
+            onClick={onRefund}
+          >
+            Refund
+          </Button>
+        )}
+        <Button
+          type="button"
+          variant="secondary"
+          size="lg"
+          className="h-14 flex-[2] text-lg font-semibold"
+          onClick={onClear}
+        >
+          Clear
+        </Button>
+      </div>
     </div>
   )
 }

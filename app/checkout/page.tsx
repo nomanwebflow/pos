@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
+import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { AppSidebar } from "@/components/app-sidebar"
 import {
@@ -44,9 +45,11 @@ import {
   Tag,
   CheckCircle2,
   Printer,
+  ImageIcon,
 } from "lucide-react"
 import { Receipt } from "@/components/receipt"
 import { VirtualKeyboard } from "@/components/virtual-keyboard"
+import Image from "next/image"
 
 interface Product {
   id: string
@@ -57,6 +60,7 @@ interface Product {
   sellingPrice: number
   stockLevel: number
   taxable: number
+  imageUrl: string | null
 }
 
 interface CartItem extends Product {
@@ -85,6 +89,7 @@ export default function CheckoutPage() {
   const barcodeInputRef = useRef<HTMLInputElement>(null)
   const receiptRef = useRef<HTMLDivElement>(null)
   const supabase = createClient()
+  const router = useRouter()
 
   const TAX_RATE = 15 // 15% VAT for Mauritius
 
@@ -96,6 +101,20 @@ export default function CheckoutPage() {
         window.location.href = "/login"
         return
       }
+
+      // Check role - SUPER_ADMIN should not access POS
+      const { data: profile } = await supabase
+        .from('User')
+        .select('role')
+        .eq('id', user.id)
+        .single()
+
+      if (profile?.role === 'SUPER_ADMIN') {
+        alert("Super Admins cannot access the Point of Sale. Please use the Dashboard.")
+        window.location.href = "/"
+        return
+      }
+
       setIsLoading(false)
     }
     checkAuth()
@@ -108,15 +127,15 @@ export default function CheckoutPage() {
     }
   }, [isLoading])
 
-  // Auto-focus barcode input
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (barcodeInputRef.current && document.activeElement !== barcodeInputRef.current) {
-        barcodeInputRef.current.focus()
-      }
-    }, 1000)
-    return () => clearInterval(interval)
-  }, [])
+    if (!isLoading) {
+      loadProducts()
+      loadCategories()
+    }
+  }, [isLoading])
+
+  // Removed auto-focus barcode input to allow search input focus
+
 
   const loadProducts = async () => {
     try {
@@ -553,6 +572,7 @@ export default function CheckoutPage() {
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
                   <Input
+                    autoFocus
                     placeholder="Search products..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
@@ -603,16 +623,36 @@ export default function CheckoutPage() {
                     className="cursor-pointer transition-colors hover:bg-accent"
                     onClick={() => addToCart(product)}
                   >
-                    <CardHeader className="p-4">
-                      <CardTitle className="text-base">{product.name}</CardTitle>
-                      <p className="text-sm text-muted-foreground">{product.sku}</p>
+                    <CardHeader className="p-0">
+                      <div className="aspect-square w-full relative bg-muted">
+                        {product.imageUrl ? (
+                          <Image
+                            src={product.imageUrl}
+                            alt={product.name}
+                            fill
+                            className="object-cover rounded-t-lg"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center">
+                            <ImageIcon className="h-12 w-12 text-muted-foreground opacity-50" />
+                          </div>
+                        )}
+                        {product.stockLevel <= 10 && (
+                          <div className="absolute top-2 right-2">
+                            <Badge variant="destructive" className="shadow-sm">
+                              Low Stock: {product.stockLevel}
+                            </Badge>
+                          </div>
+                        )}
+                      </div>
                     </CardHeader>
-                    <CardContent className="p-4 pt-0">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xl font-bold">MUR {product.sellingPrice.toFixed(2)}</span>
-                        <Badge variant={product.stockLevel > 10 ? "default" : "destructive"}>
-                          Stock: {product.stockLevel}
-                        </Badge>
+                    <CardContent className="p-3">
+                      <div className="mb-1">
+                        <CardTitle className="text-sm font-semibold leading-tight line-clamp-2 min-h-[2.5rem]">{product.name}</CardTitle>
+                        <p className="text-xs text-muted-foreground mt-1">{product.sku}</p>
+                      </div>
+                      <div className="flex items-center justify-between mt-2">
+                        <span className="text-lg font-bold">MUR {product.sellingPrice.toFixed(2)}</span>
                       </div>
                     </CardContent>
                   </Card>
@@ -722,6 +762,35 @@ export default function CheckoutPage() {
                   <CreditCard className="mr-2 h-5 w-5" />
                   Checkout
                 </Button>
+              </div>
+
+              {/* Virtual Keyboard */}
+              <div className="mt-4 pt-4 border-t">
+                <VirtualKeyboard
+                  onRefund={() => router.push('/transactions')}
+                  onKeyPress={(key) => {
+                    if (activeInput) {
+                      handleKeyboardInput(key)
+                    } else {
+                      // Default to barcode input if no specific input is active
+                      setBarcodeInput(prev => prev + key)
+                    }
+                  }}
+                  onBackspace={() => {
+                    if (activeInput) {
+                      handleKeyboardBackspace()
+                    } else {
+                      setBarcodeInput(prev => prev.slice(0, -1))
+                    }
+                  }}
+                  onClear={() => {
+                    if (activeInput) {
+                      handleKeyboardClear()
+                    } else {
+                      setBarcodeInput("")
+                    }
+                  }}
+                />
               </div>
             </div>
           </div>

@@ -28,27 +28,41 @@ enum StockMovementType {
   SALE
   REFILL
   ADJUSTMENT
+  REFUND
+}
+
+enum RefundType {
+  FULL
+  PARTIAL
+}
+
+enum RefundStatus {
+  NONE
+  PARTIAL
+  FULL
 }
 
 // Business/Store Configuration
 model Business {
-  id          String   @id @default(cuid())
-  name        String
-  address     String?
-  phone       String?
-  email       String?
-  taxNumber   String?
-  currency    String   @default("MUR")
-  taxRate     Float    @default(15.0) // VAT for Mauritius
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              String   @id @default(cuid())
+  name            String
+  address         String?
+  phone           String?
+  email           String?
+  taxNumber       String?
+  currency        String   @default("MUR")
+  taxRate         Float    @default(15.0) // VAT for Mauritius
+  refundTimeLimit Int?     @default(30) // Days allowed for refunds (null = unlimited)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  users       User[]
-  products    Product[]
+  users             User[]
+  products          Product[]
   productCategories ProductCategory[]
-  sales       Sale[]
-  customers   Customer[]
-  settings    Settings[]
+  sales             Sale[]
+  customers         Customer[]
+  settings          Settings[]
+  refunds           Refund[]
 }
 
 // User Management
@@ -67,6 +81,7 @@ model User {
   sales         Sale[]
   stockMovements StockMovement[]
   auditLogs     AuditLog[]
+  refunds       Refund[]
 }
 
 // Product Categories
@@ -89,6 +104,7 @@ model Product {
   name            String
   sku             String    @unique
   barcode         String?   @unique
+  imageUrl        String?
   description     String?
   category        String?
   costPrice       Float?
@@ -104,6 +120,7 @@ model Product {
 
   saleItems       SaleItem[]
   stockMovements  StockMovement[]
+  refundItems     RefundItem[]
 }
 
 // Customer Management
@@ -143,24 +160,28 @@ model Sale {
   user            User          @relation(fields: [userId], references: [id])
   businessId      String
   business        Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  refundStatus    RefundStatus  @default(NONE)
+  totalRefunded   Float         @default(0)
   createdAt       DateTime      @default(now())
 
   saleItems       SaleItem[]
+  refunds         Refund[]
 }
 
 // Sale Line Items
 model SaleItem {
-  id              String   @id @default(cuid())
-  saleId          String
-  sale            Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  productId       String
-  product         Product  @relation(fields: [productId], references: [id])
-  quantity        Int
-  unitPrice       Float
-  subtotal        Float
-  taxAmount       Float
-  total           Float
-  createdAt       DateTime @default(now())
+  id               String   @id @default(cuid())
+  saleId           String
+  sale             Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId        String
+  product          Product  @relation(fields: [productId], references: [id])
+  quantity         Int
+  unitPrice        Float
+  subtotal         Float
+  taxAmount        Float
+  total            Float
+  quantityRefunded Int      @default(0)
+  createdAt        DateTime @default(now())
 }
 
 // Stock Movement Tracking
@@ -202,4 +223,42 @@ model AuditLog {
   userId          String
   user            User     @relation(fields: [userId], references: [id])
   createdAt       DateTime @default(now())
+}
+
+// Refund Transaction
+model Refund {
+  id              String        @id @default(cuid())
+  refundNumber    String        @unique
+  saleId          String
+  sale            Sale          @relation(fields: [saleId], references: [id])
+  refundType      RefundType
+  subtotal        Float
+  taxAmount       Float
+  total           Float
+  paymentMethod   PaymentMethod
+  reason          String
+  notes           String?
+  userId          String
+  user            User          @relation(fields: [userId], references: [id])
+  businessId      String
+  business        Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  createdAt       DateTime      @default(now())
+
+  refundItems     RefundItem[]
+}
+
+// Refund Line Items
+model RefundItem {
+  id               String   @id @default(cuid())
+  refundId         String
+  refund           Refund   @relation(fields: [refundId], references: [id], onDelete: Cascade)
+  saleItemId       String
+  productId        String
+  product          Product  @relation(fields: [productId], references: [id])
+  quantityRefunded Int
+  unitPrice        Float
+  subtotal         Float
+  taxAmount        Float
+  total            Float
+  createdAt        DateTime @default(now())
 }

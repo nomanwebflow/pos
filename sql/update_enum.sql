@@ -1,0 +1,4 @@
+
+-- Add missing roles to UserRole enum
+ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS 'CASHIER';
+ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS 'STOCK_MANAGER';

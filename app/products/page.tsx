@@ -49,8 +49,23 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Plus, Search, Package, AlertTriangle, Edit, Tag, Scan, Trash2, X } from "lucide-react"
+import { Plus, Search, Package, AlertTriangle, Edit, Tag, Scan, Trash2, X, Upload, Archive, ArrowUpDown, ArrowUp, ArrowDown, ImageIcon } from "lucide-react"
 import { useUser, usePermission } from "@/components/rbac"
+import Papa from "papaparse"
+import { useRef } from "react"
+import { ProductImportDialog } from "@/components/product-import-dialog"
+import { ImageUpload } from "@/components/image-upload"
+import Image from "next/image"
+import { toast } from "sonner"
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination"
 
 interface ProductCategory {
   id: string
@@ -71,6 +86,7 @@ interface Product {
   lowStockThreshold: number
   taxable: number
   isActive: number
+  imageUrl: string | null
 }
 
 export default function ProductsPage() {
@@ -82,6 +98,7 @@ export default function ProductsPage() {
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [editingCategory, setEditingCategory] = useState<ProductCategory | null>(null)
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [categoryFormData, setCategoryFormData] = useState({
     name: "",
     description: "",
@@ -97,19 +114,106 @@ export default function ProductsPage() {
     stockLevel: "",
     lowStockThreshold: "10",
     taxable: true,
+    imageUrl: "",
   })
+
+  // Bulk Actions State
+  const [selectedProducts, setSelectedProducts] = useState<string[]>([])
+
+  // Sorting State
+  const [sortColumn, setSortColumn] = useState<keyof Product | null>(null)
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1)
+  const itemsPerPage = 10
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedProducts(filteredProducts.map(p => p.id))
+    } else {
+      setSelectedProducts([])
+    }
+  }
+
+  const handleSelectProduct = (productId: string, checked: boolean) => {
+    if (checked) {
+      setSelectedProducts(prev => [...prev, productId])
+    } else {
+      setSelectedProducts(prev => prev.filter(id => id !== productId))
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    if (!confirm(`Are you sure you want to delete ${selectedProducts.length} products?`)) return
+    setIsLoading(true)
+    try {
+      const res = await fetch('/api/products/batch', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedProducts })
+      })
+      if (res.ok) {
+        toast.success(`Deleted ${selectedProducts.length} products`)
+        setSelectedProducts([])
+        loadProducts()
+      } else {
+        toast.error('Failed to delete products')
+      }
+    } catch (error) {
+      console.error('Bulk delete error:', error)
+      toast.error('Error deleting products')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleBulkDraft = async () => {
+    if (!confirm(`Set ${selectedProducts.length} products to Inactive (Draft)?`)) return
+    setIsLoading(true)
+    try {
+      const res = await fetch('/api/products/batch', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedProducts, updates: { isActive: 0 } }) // 0 = Inactive
+      })
+      if (res.ok) {
+        toast.success(`Updated ${selectedProducts.length} products to Draft`)
+        setSelectedProducts([])
+        loadProducts()
+      } else {
+        toast.error('Failed to update products')
+      }
+    } catch (error) {
+      console.error('Bulk update error:', error)
+      toast.error('Error updating products')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Status filter state
+  const [statusFilter, setStatusFilter] = useState<'active' | 'draft' | 'all'>('active')
 
   useEffect(() => {
     loadProducts()
+    // categories loaded once on mount
+  }, [statusFilter]) // Reload when status filter changes
+
+  useEffect(() => {
+    // Initial load including categories
     loadCategories()
   }, [])
 
+
   const loadProducts = async () => {
     try {
-      const res = await fetch("/api/products-supabase")
+      const res = await fetch(`/api/products-supabase?status=${statusFilter}`)
       if (res.ok) {
         const data = await res.json()
         setProducts(data)
+        // Clear selection to avoid actions on hidden items
+        setSelectedProducts([])
       }
     } catch (error) {
       console.error("Error loading products:", error)
@@ -138,20 +242,7 @@ export default function ProductsPage() {
         const data = await res.json()
         if (data.length === 0) {
           // Product not found, open dialog with barcode pre-filled
-          setFormData({
-            name: "",
-            sku: `SKU-${Date.now()}`, // Auto-generate SKU
-            barcode: barcode,
-            description: "",
-            category: "",
-            costPrice: "",
-            sellingPrice: "",
-            stockLevel: "0",
-            lowStockThreshold: "10",
-            taxable: true,
-          })
-          setIsDialogOpen(true)
-          setBarcodeInput("")
+          handleNewProduct(barcode)
         } else {
           // Product found, highlight it in search
           setSearchQuery(barcode)
@@ -239,50 +330,81 @@ export default function ProductsPage() {
     setCategoryFormData({ name: "", description: "" })
   }
 
+  const handleNewProduct = (barcodeRaw?: string) => {
+    setEditingProduct(null)
+    setFormData({
+      name: "",
+      sku: `SKU-${Date.now()}`,
+      barcode: barcodeRaw || "",
+      description: "",
+      category: "",
+      costPrice: "",
+      sellingPrice: "",
+      stockLevel: "",
+      lowStockThreshold: "10",
+      taxable: true,
+      imageUrl: "",
+    })
+    setIsDialogOpen(true)
+    setBarcodeInput("")
+  }
+
+  const handleEditProduct = (product: Product) => {
+    setEditingProduct(product)
+    setFormData({
+      name: product.name,
+      sku: product.sku,
+      barcode: product.barcode || "",
+      description: product.description || "",
+      category: product.category || "",
+      costPrice: product.costPrice ? product.costPrice.toString() : "",
+      sellingPrice: product.sellingPrice.toString(),
+      stockLevel: product.stockLevel.toString(),
+      lowStockThreshold: product.lowStockThreshold.toString(),
+      taxable: Boolean(product.taxable),
+      imageUrl: product.imageUrl || "",
+    })
+    setIsDialogOpen(true)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
 
     try {
+      const method = editingProduct ? "PATCH" : "POST"
+      const body = {
+        name: formData.name,
+        sku: formData.sku,
+        barcode: formData.barcode || null,
+        description: formData.description || null,
+        category: formData.category || null,
+        costPrice: formData.costPrice ? parseFloat(formData.costPrice) : null,
+        sellingPrice: parseFloat(formData.sellingPrice),
+        stockLevel: parseInt(formData.stockLevel),
+        lowStockThreshold: parseInt(formData.lowStockThreshold),
+        taxable: formData.taxable,
+        imageUrl: formData.imageUrl || null,
+        ...(editingProduct ? { id: editingProduct.id } : {})
+      }
+
       const res = await fetch("/api/products-supabase", {
-        method: "POST",
+        method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: formData.name,
-          sku: formData.sku,
-          barcode: formData.barcode || null,
-          description: formData.description || null,
-          category: formData.category || null,
-          costPrice: formData.costPrice ? parseFloat(formData.costPrice) : null,
-          sellingPrice: parseFloat(formData.sellingPrice),
-          stockLevel: parseInt(formData.stockLevel),
-          lowStockThreshold: parseInt(formData.lowStockThreshold),
-          taxable: formData.taxable,
-        })
+        body: JSON.stringify(body)
       })
 
       if (res.ok) {
         setIsDialogOpen(false)
         loadProducts()
-        // Reset form
-        setFormData({
-          name: "",
-          sku: "",
-          barcode: "",
-          description: "",
-          category: "",
-          costPrice: "",
-          sellingPrice: "",
-          stockLevel: "",
-          lowStockThreshold: "10",
-          taxable: true,
-        })
+        setEditingProduct(null) // Reset editing state
+        handleNewProduct() // Reset form to default for next open
       } else {
-        alert("Error creating product")
+        alert(editingProduct ? "Error updating product" : "Error creating product")
       }
     } catch (error) {
-      console.error("Error creating product:", error)
-      alert("Error creating product")
+      console.error("Error saving product:", error)
+      alert("Error saving product")
     } finally {
       setIsLoading(false)
     }
@@ -294,12 +416,63 @@ export default function ProductsPage() {
     product.barcode?.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
+  // Sorting handler
+  const handleSort = (column: keyof Product) => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortColumn(column)
+      setSortDirection('asc')
+    }
+    setCurrentPage(1) // Reset to first page when sorting
+  }
+
+  // Sort products
+  const sortedProducts = [...filteredProducts].sort((a, b) => {
+    if (!sortColumn) return 0
+
+    const aValue = a[sortColumn]
+    const bValue = b[sortColumn]
+
+    if (aValue === null || aValue === undefined) return 1
+    if (bValue === null || bValue === undefined) return -1
+
+    if (typeof aValue === 'string' && typeof bValue === 'string') {
+      return sortDirection === 'asc'
+        ? aValue.localeCompare(bValue)
+        : bValue.localeCompare(aValue)
+    }
+
+    if (typeof aValue === 'number' && typeof bValue === 'number') {
+      return sortDirection === 'asc' ? aValue - bValue : bValue - aValue
+    }
+
+    return 0
+  })
+
+  // Pagination
+  const totalPages = Math.ceil(sortedProducts.length / itemsPerPage)
+  const startIndex = (currentPage - 1) * itemsPerPage
+  const endIndex = startIndex + itemsPerPage
+  const paginatedProducts = sortedProducts.slice(startIndex, endIndex)
+
   const lowStockCount = products.filter(p => p.stockLevel <= p.lowStockThreshold).length
+
+  // Sort icon component
+  const SortIcon = ({ column }: { column: keyof Product }) => {
+    if (sortColumn !== column) {
+      return <ArrowUpDown className="ml-2 h-4 w-4" />
+    }
+    return sortDirection === 'asc'
+      ? <ArrowUp className="ml-2 h-4 w-4" />
+      : <ArrowDown className="ml-2 h-4 w-4" />
+  }
 
   // Permission checks
   const user = useUser()
-  const canManageProducts = usePermission("editProduct") // Stock Manager and Super Admin can add/edit products
-  const canManageCategories = usePermission("manageCategories") // Stock Manager and Super Admin
+  // Super Admin can edit products
+  const canManageProducts = usePermission("editProduct")
+  const canManageCategories = usePermission("manageCategories")
 
   return (
     <SidebarProvider>
@@ -363,9 +536,31 @@ export default function ProductsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle>Products</CardTitle>
-                  <CardDescription>Manage your product inventory</CardDescription>
+                  <CardDescription>
+                    {products.length} products total
+                    {selectedProducts.length > 0 && <span className="ml-2 font-medium text-primary">({selectedProducts.length} selected)</span>}
+                  </CardDescription>
                 </div>
                 <div className="flex gap-2">
+                  {selectedProducts.length > 0 && canManageProducts && (
+                    <>
+                      <Button variant="destructive" size="sm" onClick={handleBulkDelete}>
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Delete ({selectedProducts.length})
+                      </Button>
+                      <Button variant="secondary" size="sm" onClick={handleBulkDraft}>
+                        <Archive className="mr-2 h-4 w-4" />
+                        Draft ({selectedProducts.length})
+                      </Button>
+                      <div className="mx-2 w-px bg-border" />
+                    </>
+                  )}
+                  {canManageProducts && (
+                    <ProductImportDialog onSuccess={() => {
+                      loadProducts()
+                      loadCategories()
+                    }} />
+                  )}
                   {canManageCategories && (
                     <Button variant="outline" onClick={() => setIsCategoryDialogOpen(true)}>
                       <Tag className="mr-2 h-4 w-4" />
@@ -373,7 +568,7 @@ export default function ProductsPage() {
                     </Button>
                   )}
                   {canManageProducts && (
-                    <Button onClick={() => setIsDialogOpen(true)}>
+                    <Button onClick={() => handleNewProduct()}>
                       <Plus className="mr-2 h-4 w-4" />
                       Add Product
                     </Button>
@@ -398,6 +593,22 @@ export default function ProductsPage() {
                     Scan
                   </Button>
                 </form>
+                {/* Status Filter */}
+                <div className="w-[150px]">
+                  <Select
+                    value={statusFilter}
+                    onValueChange={(val) => setStatusFilter(val as any)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="draft">Draft (Inactive)</SelectItem>
+                      <SelectItem value="all">All Products</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 {/* Search Input */}
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -413,19 +624,61 @@ export default function ProductsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>SKU</TableHead>
+                    <TableHead className="w-12">
+                      <Checkbox
+                        checked={filteredProducts.length > 0 && selectedProducts.length === filteredProducts.length}
+                        onCheckedChange={(checked) => handleSelectAll(!!checked)}
+                      />
+                    </TableHead>
+                    <TableHead className="w-[80px]">Image</TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => handleSort('name')}>
+                      <div className="flex items-center">Name <SortIcon column="name" /></div>
+                    </TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => handleSort('sku')}>
+                      <div className="flex items-center">SKU <SortIcon column="sku" /></div>
+                    </TableHead>
                     <TableHead>Barcode</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead className="text-right">Cost Price</TableHead>
-                    <TableHead className="text-right">Selling Price</TableHead>
-                    <TableHead className="text-right">Stock</TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => handleSort('category')}>
+                      <div className="flex items-center">Category <SortIcon column="category" /></div>
+                    </TableHead>
+                    <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('costPrice')}>
+                      <div className="flex items-center justify-end">Cost Price <SortIcon column="costPrice" /></div>
+                    </TableHead>
+                    <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('sellingPrice')}>
+                      <div className="flex items-center justify-end">Selling Price <SortIcon column="sellingPrice" /></div>
+                    </TableHead>
+                    <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('stockLevel')}>
+                      <div className="flex items-center justify-end">Stock <SortIcon column="stockLevel" /></div>
+                    </TableHead>
                     <TableHead>Status</TableHead>
+                    {canManageProducts && <TableHead className="text-right">Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredProducts.map((product) => (
+                  {paginatedProducts.map((product) => (
                     <TableRow key={product.id}>
+                      <TableCell>
+                        <Checkbox
+                          checked={selectedProducts.includes(product.id)}
+                          onCheckedChange={(checked) => handleSelectProduct(product.id, !!checked)}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        {product.imageUrl ? (
+                          <div className="relative h-10 w-10 rounded-md overflow-hidden border">
+                            <Image
+                              src={product.imageUrl}
+                              alt={product.name}
+                              fill
+                              className="object-cover"
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex h-10 w-10 items-center justify-center rounded-md border bg-muted">
+                            <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                          </div>
+                        )}
+                      </TableCell>
                       <TableCell className="font-medium">{product.name}</TableCell>
                       <TableCell>{product.sku}</TableCell>
                       <TableCell>{product.barcode || "-"}</TableCell>
@@ -442,33 +695,112 @@ export default function ProductsPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
+                        {!product.isActive && <Badge variant="secondary" className="mr-2">Draft</Badge>}
                         {product.stockLevel <= product.lowStockThreshold && (
                           <Badge variant="destructive">Low Stock</Badge>
                         )}
-                        {product.stockLevel > product.lowStockThreshold && (
+                        {product.stockLevel > product.lowStockThreshold && product.isActive === 1 && (
                           <Badge variant="default">In Stock</Badge>
                         )}
                       </TableCell>
+                      {canManageProducts && (
+                        <TableCell className="text-right">
+                          <Button variant="ghost" size="sm" onClick={() => handleEditProduct(product)}>
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="mt-4">
+                  <Pagination>
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            if (currentPage > 1) setCurrentPage(currentPage - 1)
+                          }}
+                          className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                        />
+                      </PaginationItem>
+
+                      {[...Array(totalPages)].map((_, i) => {
+                        const page = i + 1
+                        // Show first page, last page, current page, and pages around current
+                        if (
+                          page === 1 ||
+                          page === totalPages ||
+                          (page >= currentPage - 1 && page <= currentPage + 1)
+                        ) {
+                          return (
+                            <PaginationItem key={page}>
+                              <PaginationLink
+                                href="#"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  setCurrentPage(page)
+                                }}
+                                isActive={currentPage === page}
+                                className="cursor-pointer"
+                              >
+                                {page}
+                              </PaginationLink>
+                            </PaginationItem>
+                          )
+                        } else if (page === currentPage - 2 || page === currentPage + 2) {
+                          return (
+                            <PaginationItem key={page}>
+                              <PaginationEllipsis />
+                            </PaginationItem>
+                          )
+                        }
+                        return null
+                      })}
+
+                      <PaginationItem>
+                        <PaginationNext
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            if (currentPage < totalPages) setCurrentPage(currentPage + 1)
+                          }}
+                          className={currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                        />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
       </SidebarInset>
 
-      {/* Add Product Dialog */}
+      {/* Add/Edit Product Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Add New Product</DialogTitle>
+            <DialogTitle>{editingProduct ? "Edit Product" : "Add New Product"}</DialogTitle>
             <DialogDescription>
-              Enter the product details below
+              {editingProduct ? "Update product details below" : "Enter the product details below"}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit}>
             <FieldGroup>
+              <Field>
+                <FieldLabel>Product Image</FieldLabel>
+                <ImageUpload
+                  value={formData.imageUrl}
+                  onChange={(url) => setFormData({ ...formData, imageUrl: url || "" })}
+                />
+              </Field>
               <div className="grid grid-cols-2 gap-4">
                 <Field>
                   <FieldLabel htmlFor="name">Product Name *</FieldLabel>
@@ -555,7 +887,7 @@ export default function ProductsPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <Field>
-                  <FieldLabel htmlFor="stockLevel">Initial Stock *</FieldLabel>
+                  <FieldLabel htmlFor="stockLevel">Stock Level *</FieldLabel>
                   <Input
                     id="stockLevel"
                     type="number"
@@ -592,7 +924,7 @@ export default function ProductsPage() {
                 Cancel
               </Button>
               <Button type="submit" disabled={isLoading}>
-                {isLoading ? "Creating..." : "Create Product"}
+                {isLoading ? (editingProduct ? "Updating..." : "Creating...") : (editingProduct ? "Update Product" : "Create Product")}
               </Button>
             </DialogFooter>
           </form>

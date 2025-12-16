@@ -6,7 +6,7 @@ const DEFAULT_BUSINESS_ID = 'default-business'
 
 export async function GET() {
   try {
-    const categories = productQueries.getCategories(DEFAULT_BUSINESS_ID)
+    const categories = await productQueries.getCategories(DEFAULT_BUSINESS_ID)
     return NextResponse.json(categories)
   } catch (error: any) {
     console.error('Error fetching categories:', error)

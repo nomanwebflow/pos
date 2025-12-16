@@ -16,6 +16,7 @@ import {
   UserCog,
   ChevronRight,
   Tag,
+  RotateCcw,
 } from "lucide-react"
 
 import {
@@ -61,14 +62,12 @@ const navItems = [
     url: "/products",
     icon: Package,
     permission: "viewProducts" as const,
-    subItems: [
-      {
-        title: "Categories",
-        url: "/categories",
-        icon: Tag,
-        permission: "viewProducts" as const,
-      },
-    ],
+  },
+  {
+    title: "Categories",
+    url: "/categories",
+    icon: Tag,
+    permission: "viewProducts" as const,
   },
   {
     title: "Customers",
@@ -89,6 +88,12 @@ const navItems = [
     permission: "viewTransactions" as const,
   },
   {
+    title: "Refunds",
+    url: "/refunds",
+    icon: RotateCcw,
+    permission: "viewRefunds" as const,
+  },
+  {
     title: "Payment Analytics",
     url: "/payments",
     icon: Wallet,
@@ -105,12 +110,17 @@ const navItems = [
 export function AppSidebar() {
   const pathname = usePathname()
   const router = useRouter()
-  const user = useUser()
+  const { user, loading } = useUser()
 
   const handleLogout = async () => {
     const supabase = createClient()
     await supabase.auth.signOut()
     router.push("/login")
+  }
+
+  // Hide sidebar for cashiers
+  if (user?.role === 'CASHIER') {
+    return null
   }
 
   return (
@@ -131,10 +141,12 @@ export function AppSidebar() {
           <SidebarGroupLabel>Main Menu</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {user ? navItems.map((item) => {
+              {loading ? (
+                <div className="p-4 text-sm text-muted-foreground">Loading...</div>
+              ) : user ? navItems.map((item) => {
                 const isActive = pathname === item.url
-                const hasSubItems = 'subItems' in item && item.subItems && item.subItems.length > 0
-                const isSubItemActive = hasSubItems && item.subItems.some(sub => pathname === sub.url)
+                const hasSubItems = 'subItems' in item && Array.isArray((item as any).subItems) && (item as any).subItems.length > 0
+                const isSubItemActive = hasSubItems && (item as any).subItems.some((sub: any) => pathname === sub.url)
 
                 // Check permission - all items now have permissions
                 const hasAccess = hasPermission(user.role, item.permission)
@@ -163,7 +175,7 @@ export function AppSidebar() {
                         </CollapsibleTrigger>
                         <CollapsibleContent>
                           <SidebarMenuSub>
-                            {item.subItems.map((subItem) => {
+                            {((item as any).subItems as any[]).map((subItem: any) => {
                               const subItemActive = pathname === subItem.url
                               const hasSubAccess = hasPermission(user.role, subItem.permission)
 
@@ -206,7 +218,8 @@ export function AppSidebar() {
                   </SidebarMenuItem>
                 )
               }) : (
-                <div className="p-4 text-sm text-muted-foreground">Loading...</div>
+                // User not found state, maybe redirect or empty
+                null
               )}
             </SidebarMenu>
           </SidebarGroupContent>

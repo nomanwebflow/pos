@@ -8,7 +8,7 @@ interface UserProfile {
   id: string
   role: string
   name: string
-  is_active: boolean
+  isActive: boolean
 }
 
 interface RBACProps {
@@ -19,9 +19,9 @@ interface RBACProps {
 
 // Component to conditionally render based on permissions
 export function RBAC({ permission, children, fallback = null }: RBACProps) {
-  const user = useUser()
+  const { user, loading } = useUser()
 
-  if (!user) {
+  if (loading || !user) {
     return <>{fallback}</>
   }
 
@@ -32,9 +32,9 @@ export function RBAC({ permission, children, fallback = null }: RBACProps) {
 
 // Hook to check permissions in components
 export function usePermission(permission: keyof typeof permissions): boolean {
-  const user = useUser()
+  const { user, loading } = useUser()
 
-  if (!user) {
+  if (loading || !user) {
     return false
   }
 
@@ -44,28 +44,43 @@ export function usePermission(permission: keyof typeof permissions): boolean {
 // Hook to get user info
 export function useUser() {
   const [user, setUser] = useState<UserProfile | null>(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const supabase = createClient()
 
     // Get current user and their profile
     const fetchUser = async () => {
-      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()
+      console.log('[RBAC] Starting fetchUser...')
+      try {
+        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()
+        console.log('[RBAC] Auth user fetch result:', { authUser, authError })
 
-      if (authUser) {
-        const { data: profile, error: profileError } = await supabase
-          .from('user_profiles')
-          .select('*')
-          .eq('id', authUser.id)
-          .single()
+        if (authUser) {
+          const { data: profile, error: profileError } = await supabase
+            .from('User')
+            .select('*')
+            .eq('id', authUser.id)
+            .single()
 
-        if (profile) {
-          setUser(profile as UserProfile)
+          console.log('[RBAC] Profile fetch result:', { profile, profileError })
+
+          if (profile) {
+            setUser(profile as UserProfile)
+          } else {
+            console.error('[RBAC] No profile found for user:', authUser.id)
+            setUser(null)
+          }
         } else {
+          console.log('[RBAC] No auth user found')
           setUser(null)
         }
-      } else {
+      } catch (error) {
+        console.error('[RBAC] Error fetching user:', error)
         setUser(null)
+      } finally {
+        console.log('[RBAC] Finished fetchUser, setting loading to false')
+        setLoading(false)
       }
     }
 
@@ -81,5 +96,5 @@ export function useUser() {
     }
   }, [])
 
-  return user
+  return { user, loading }
 }

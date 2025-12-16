@@ -22,10 +22,10 @@ export function useUserRole() {
       }
 
       const { data } = await supabase
-        .from('user_profiles')
+        .from('User')
         .select('*')
         .eq('id', user.id)
-        .eq('is_active', true)
+        .eq('isActive', true)
         .single()
 
       setProfile(data as UserProfile | null)

@@ -41,16 +41,26 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
-import { Plus, Search, Tag, Edit, Trash2 } from "lucide-react"
+import { Plus, Search, Tag, Edit, Trash2, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { useUser, usePermission } from "@/components/rbac"
-import { createClient } from "@/lib/supabase/client"
+import { toast } from "sonner"
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination"
 
 interface ProductCategory {
   id: string
   name: string
   description: string | null
-  created_at: string
-  created_by: string
+  createdAt: string
+  updatedAt: string
+  isActive: number
 }
 
 export default function CategoriesPage() {
@@ -64,9 +74,16 @@ export default function CategoriesPage() {
     description: "",
   })
 
+  // Sorting State
+  const [sortColumn, setSortColumn] = useState<keyof ProductCategory | null>(null)
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1)
+  const itemsPerPage = 10
+
   const user = useUser()
   const canManageCategories = usePermission("manageProducts")
-  const supabase = createClient()
 
   useEffect(() => {
     loadCategories()
@@ -74,15 +91,16 @@ export default function CategoriesPage() {
 
   const loadCategories = async () => {
     try {
-      const res = await fetch("/api/categories-supabase?full=true")
+      const res = await fetch("/api/categories")
       if (res.ok) {
         const data = await res.json()
         setCategories(data)
       } else if (res.status === 401) {
         alert("Session expired. Please login again.")
-        window.location.href = "/login"
+        // window.location.href = "/login" // Don't force redirect if just session token refresh needed, or handle gracefully
       } else {
-        console.error("Error loading categories:", await res.text())
+        const text = await res.text()
+        console.error("Error loading categories:", text)
       }
     } catch (error) {
       console.error("Error loading categories:", error)
@@ -120,36 +138,30 @@ export default function CategoriesPage() {
     setIsLoading(true)
 
     try {
-      if (editingCategory) {
-        // Update existing category
-        const { error } = await supabase
-          .from('categories')
-          .update({
-            name: formData.name,
-            description: formData.description || null,
-          })
-          .eq('id', editingCategory.id)
-
-        if (error) throw error
-        alert("Category updated successfully!")
-      } else {
-        // Create new category
-        const { error } = await supabase
-          .from('categories')
-          .insert({
-            name: formData.name,
-            description: formData.description || null,
-          })
-
-        if (error) throw error
-        alert("Category created successfully!")
+      const method = editingCategory ? "PUT" : "POST"
+      const body = {
+        name: formData.name,
+        description: formData.description || null,
+        ...(editingCategory ? { id: editingCategory.id } : {})
       }
 
+      const res = await fetch("/api/categories", {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      })
+
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || "Failed to save category")
+      }
+
+      toast.success(editingCategory ? "Category updated successfully!" : "Category created successfully!")
       handleCloseDialog()
       await loadCategories()
     } catch (error: any) {
       console.error("Error saving category:", error)
-      alert(`Error: ${error.message || "Failed to save category"}`)
+      toast.error(`Error: ${error.message || "Failed to save category"}`)
     } finally {
       setIsLoading(false)
     }
@@ -161,24 +173,76 @@ export default function CategoriesPage() {
     }
 
     try {
-      const { error } = await supabase
-        .from('categories')
-        .delete()
-        .eq('id', categoryId)
+      const res = await fetch(`/api/categories?id=${categoryId}`, {
+        method: "DELETE"
+      })
 
-      if (error) throw error
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || "Failed to delete category")
+      }
 
-      alert("Category deleted successfully!")
+      toast.success("Category deleted successfully!")
       await loadCategories()
     } catch (error: any) {
       console.error("Error deleting category:", error)
-      alert(`Error: ${error.message || "Failed to delete category"}`)
+      toast.error(`Error: ${error.message || "Failed to delete category"}`)
     }
   }
 
   const filteredCategories = categories.filter(category =>
     category.name.toLowerCase().includes(searchQuery.toLowerCase())
   )
+
+  // Sorting handler
+  const handleSort = (column: keyof ProductCategory) => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortColumn(column)
+      setSortDirection('asc')
+    }
+    setCurrentPage(1)
+  }
+
+  // Sort categories
+  const sortedCategories = [...filteredCategories].sort((a, b) => {
+    if (!sortColumn) return 0
+
+    const aValue = a[sortColumn]
+    const bValue = b[sortColumn]
+
+    if (aValue === null || aValue === undefined) return 1
+    if (bValue === null || bValue === undefined) return -1
+
+    if (typeof aValue === 'string' && typeof bValue === 'string') {
+      return sortDirection === 'asc'
+        ? aValue.localeCompare(bValue)
+        : bValue.localeCompare(aValue)
+    }
+
+    if (typeof aValue === 'number' && typeof bValue === 'number') {
+      return sortDirection === 'asc' ? aValue - bValue : bValue - aValue
+    }
+
+    return 0
+  })
+
+  // Pagination
+  const totalPages = Math.ceil(sortedCategories.length / itemsPerPage)
+  const startIndex = (currentPage - 1) * itemsPerPage
+  const endIndex = startIndex + itemsPerPage
+  const paginatedCategories = sortedCategories.slice(startIndex, endIndex)
+
+  // Sort icon component
+  const SortIcon = ({ column }: { column: keyof ProductCategory }) => {
+    if (sortColumn !== column) {
+      return <ArrowUpDown className="ml-2 h-4 w-4" />
+    }
+    return sortDirection === 'asc'
+      ? <ArrowUp className="ml-2 h-4 w-4" />
+      : <ArrowDown className="ml-2 h-4 w-4" />
+  }
 
   if (!user) {
     return (
@@ -268,54 +332,123 @@ export default function CategoriesPage() {
                   )}
                 </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Description</TableHead>
-                      <TableHead>Created</TableHead>
-                      {canManageCategories && <TableHead className="text-right">Actions</TableHead>}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredCategories.map((category) => (
-                      <TableRow key={category.id}>
-                        <TableCell className="font-medium">
-                          <div className="flex items-center gap-2">
-                            <Tag className="h-4 w-4 text-muted-foreground" />
-                            {category.name}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {category.description || "—"}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {new Date(category.created_at).toLocaleDateString()}
-                        </TableCell>
-                        {canManageCategories && (
-                          <TableCell className="text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleOpenDialog(category)}
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDelete(category.id, category.name)}
-                              >
-                                <Trash2 className="h-4 w-4 text-destructive" />
-                              </Button>
+                <>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="cursor-pointer select-none" onClick={() => handleSort('name')}>
+                          <div className="flex items-center">Name <SortIcon column="name" /></div>
+                        </TableHead>
+                        <TableHead>Description</TableHead>
+                        <TableHead className="cursor-pointer select-none" onClick={() => handleSort('createdAt')}>
+                          <div className="flex items-center">Created <SortIcon column="createdAt" /></div>
+                        </TableHead>
+                        {canManageCategories && <TableHead className="text-right">Actions</TableHead>}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {paginatedCategories.map((category) => (
+                        <TableRow key={category.id}>
+                          <TableCell className="font-medium">
+                            <div className="flex items-center gap-2">
+                              <Tag className="h-4 w-4 text-muted-foreground" />
+                              {category.name}
                             </div>
                           </TableCell>
-                        )}
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                          <TableCell className="text-muted-foreground">
+                            {category.description || "—"}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {new Date(category.createdAt).toLocaleDateString()}
+                          </TableCell>
+                          {canManageCategories && (
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleOpenDialog(category)}
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleDelete(category.id, category.name)}
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          )}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+
+                  {/* Pagination */}
+                  {totalPages > 1 && (
+                    <div className="mt-4">
+                      <Pagination>
+                        <PaginationContent>
+                          <PaginationItem>
+                            <PaginationPrevious
+                              href="#"
+                              onClick={(e) => {
+                                e.preventDefault()
+                                if (currentPage > 1) setCurrentPage(currentPage - 1)
+                              }}
+                              className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                            />
+                          </PaginationItem>
+
+                          {[...Array(totalPages)].map((_, i) => {
+                            const page = i + 1
+                            if (
+                              page === 1 ||
+                              page === totalPages ||
+                              (page >= currentPage - 1 && page <= currentPage + 1)
+                            ) {
+                              return (
+                                <PaginationItem key={page}>
+                                  <PaginationLink
+                                    href="#"
+                                    onClick={(e) => {
+                                      e.preventDefault()
+                                      setCurrentPage(page)
+                                    }}
+                                    isActive={currentPage === page}
+                                    className="cursor-pointer"
+                                  >
+                                    {page}
+                                  </PaginationLink>
+                                </PaginationItem>
+                              )
+                            } else if (page === currentPage - 2 || page === currentPage + 2) {
+                              return (
+                                <PaginationItem key={page}>
+                                  <PaginationEllipsis />
+                                </PaginationItem>
+                              )
+                            }
+                            return null
+                          })}
+
+                          <PaginationItem>
+                            <PaginationNext
+                              href="#"
+                              onClick={(e) => {
+                                e.preventDefault()
+                                if (currentPage < totalPages) setCurrentPage(currentPage + 1)
+                              }}
+                              className={currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                            />
+                          </PaginationItem>
+                        </PaginationContent>
+                      </Pagination>
+                    </div>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>

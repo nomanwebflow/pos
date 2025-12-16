@@ -7,6 +7,7 @@ export { permissions, hasPermission, type UserRole }
 
 // Role hierarchy for permission checking
 const roleHierarchy: Record<UserRole, number> = {
+  OWNER: 4,
   SUPER_ADMIN: 3,
   STOCK_MANAGER: 2,
   CASHIER: 1,

@@ -1,3 +1,5 @@
+import Barcode from 'react-barcode'
+
 interface ReceiptProps {
   saleNumber: string
   date: string
@@ -93,125 +95,128 @@ export function Receipt({
         color: "black"
       }}>
 
-      <div style={{ textAlign: "center", marginBottom: "16px", borderBottom: "2px solid #000", paddingBottom: "8px" }}>
-        <h1 style={{ fontSize: "20px", fontWeight: "bold", margin: "0 0 8px 0" }}>{businessName}</h1>
-        <p style={{ margin: "4px 0", fontSize: "11px" }}>{businessAddress}</p>
-        <p style={{ margin: "4px 0", fontSize: "11px" }}>Tel: {businessPhone}</p>
-        <p style={{ margin: "4px 0", fontSize: "11px" }}>TIN: {businessTaxNumber}</p>
-      </div>
+        <div style={{ textAlign: "center", marginBottom: "16px", borderBottom: "2px solid #000", paddingBottom: "8px" }}>
+          <h1 style={{ fontSize: "20px", fontWeight: "bold", margin: "0 0 8px 0" }}>{businessName}</h1>
+          <p style={{ margin: "4px 0", fontSize: "11px" }}>{businessAddress}</p>
+          <p style={{ margin: "4px 0", fontSize: "11px" }}>Tel: {businessPhone}</p>
+          <p style={{ margin: "4px 0", fontSize: "11px" }}>TIN: {businessTaxNumber}</p>
+        </div>
 
-      <div style={{ marginBottom: "16px", fontSize: "11px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-          <span>Sale #:</span>
-          <span style={{ fontWeight: "bold" }}>{saleNumber}</span>
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span>Date:</span>
-          <span>{new Date(date).toLocaleString()}</span>
-        </div>
-      </div>
-
-      <div style={{ borderTop: "1px dashed #000", borderBottom: "1px dashed #000", padding: "8px 0", marginBottom: "8px" }}>
-        <table style={{ width: "100%", fontSize: "11px" }}>
-          <thead>
-            <tr style={{ borderBottom: "1px solid #000" }}>
-              <th style={{ textAlign: "left", paddingBottom: "4px" }}>Item</th>
-              <th style={{ textAlign: "center", paddingBottom: "4px" }}>Qty</th>
-              <th style={{ textAlign: "right", paddingBottom: "4px" }}>Price</th>
-              <th style={{ textAlign: "right", paddingBottom: "4px" }}>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item, index) => (
-              <tr key={index}>
-                <td style={{ paddingTop: "4px", paddingBottom: "4px" }}>{item.name}</td>
-                <td style={{ textAlign: "center", paddingTop: "4px", paddingBottom: "4px" }}>{item.quantity}</td>
-                <td style={{ textAlign: "right", paddingTop: "4px", paddingBottom: "4px" }}>
-                  {item.unitPrice.toFixed(2)}
-                </td>
-                <td style={{ textAlign: "right", paddingTop: "4px", paddingBottom: "4px" }}>
-                  {item.subtotal.toFixed(2)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div style={{ fontSize: "12px", marginBottom: "16px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-          <span>Subtotal:</span>
-          <span>MUR {subtotal.toFixed(2)}</span>
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-          <span>VAT (15%):</span>
-          <span>MUR {taxAmount.toFixed(2)}</span>
-        </div>
-        {discountAmount > 0 && (
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px", color: "#22c55e" }}>
-            <span>Discount:</span>
-            <span>-MUR {discountAmount.toFixed(2)}</span>
-          </div>
-        )}
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "16px", fontWeight: "bold", borderTop: "2px solid #000", paddingTop: "8px", marginTop: "8px" }}>
-          <span>TOTAL:</span>
-          <span>MUR {total.toFixed(2)}</span>
-        </div>
-      </div>
-
-      <div style={{ fontSize: "12px", marginBottom: "16px", borderTop: "1px dashed #000", paddingTop: "8px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-          <span>Payment Method:</span>
-          <span style={{ fontWeight: "bold" }}>{paymentMethod}</span>
-        </div>
-        {paymentMethod === "CASH" && cashReceived && (
-          <>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-              <span>Cash Received:</span>
-              <span>MUR {cashReceived.toFixed(2)}</span>
-            </div>
-            {cashChange !== undefined && cashChange > 0 && (
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px", fontWeight: "bold" }}>
-                <span>Change:</span>
-                <span>MUR {cashChange.toFixed(2)}</span>
-              </div>
-            )}
-          </>
-        )}
-        {paymentMethod === "CARD" && cardAmount && (
+        <div style={{ marginBottom: "16px", fontSize: "11px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-            <span>Card Payment:</span>
-            <span>MUR {cardAmount.toFixed(2)}</span>
+            <span>Sale #:</span>
+            <span style={{ fontWeight: "bold" }}>{saleNumber}</span>
           </div>
-        )}
-        {paymentMethod === "MIXED" && (
-          <>
-            {cashReceived && cashReceived > 0 && (
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span>Date:</span>
+            <span>{new Date(date).toLocaleString()}</span>
+          </div>
+        </div>
+
+        <div style={{ borderTop: "1px dashed #000", borderBottom: "1px dashed #000", padding: "8px 0", marginBottom: "8px" }}>
+          <table style={{ width: "100%", fontSize: "11px" }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid #000" }}>
+                <th style={{ textAlign: "left", paddingBottom: "4px" }}>Item</th>
+                <th style={{ textAlign: "center", paddingBottom: "4px" }}>Qty</th>
+                <th style={{ textAlign: "right", paddingBottom: "4px" }}>Price</th>
+                <th style={{ textAlign: "right", paddingBottom: "4px" }}>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item, index) => (
+                <tr key={index}>
+                  <td style={{ paddingTop: "4px", paddingBottom: "4px" }}>{item.name}</td>
+                  <td style={{ textAlign: "center", paddingTop: "4px", paddingBottom: "4px" }}>{item.quantity}</td>
+                  <td style={{ textAlign: "right", paddingTop: "4px", paddingBottom: "4px" }}>
+                    {item.unitPrice.toFixed(2)}
+                  </td>
+                  <td style={{ textAlign: "right", paddingTop: "4px", paddingBottom: "4px" }}>
+                    {item.subtotal.toFixed(2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{ fontSize: "12px", marginBottom: "16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+            <span>Subtotal:</span>
+            <span>MUR {subtotal.toFixed(2)}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+            <span>VAT (15%):</span>
+            <span>MUR {taxAmount.toFixed(2)}</span>
+          </div>
+          {discountAmount > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px", color: "#22c55e" }}>
+              <span>Discount:</span>
+              <span>-MUR {discountAmount.toFixed(2)}</span>
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "16px", fontWeight: "bold", borderTop: "2px solid #000", paddingTop: "8px", marginTop: "8px" }}>
+            <span>TOTAL:</span>
+            <span>MUR {total.toFixed(2)}</span>
+          </div>
+        </div>
+
+        <div style={{ fontSize: "12px", marginBottom: "16px", borderTop: "1px dashed #000", paddingTop: "8px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+            <span>Payment Method:</span>
+            <span style={{ fontWeight: "bold" }}>{paymentMethod}</span>
+          </div>
+          {paymentMethod === "CASH" && cashReceived && (
+            <>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-                <span>Cash:</span>
+                <span>Cash Received:</span>
                 <span>MUR {cashReceived.toFixed(2)}</span>
               </div>
-            )}
-            {cardAmount && cardAmount > 0 && (
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-                <span>Card:</span>
-                <span>MUR {cardAmount.toFixed(2)}</span>
-              </div>
-            )}
-            {cashChange !== undefined && cashChange > 0 && (
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px", fontWeight: "bold" }}>
-                <span>Change:</span>
-                <span>MUR {cashChange.toFixed(2)}</span>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+              {cashChange !== undefined && cashChange > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px", fontWeight: "bold" }}>
+                  <span>Change:</span>
+                  <span>MUR {cashChange.toFixed(2)}</span>
+                </div>
+              )}
+            </>
+          )}
+          {paymentMethod === "CARD" && cardAmount && (
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+              <span>Card Payment:</span>
+              <span>MUR {cardAmount.toFixed(2)}</span>
+            </div>
+          )}
+          {paymentMethod === "MIXED" && (
+            <>
+              {cashReceived && cashReceived > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+                  <span>Cash:</span>
+                  <span>MUR {cashReceived.toFixed(2)}</span>
+                </div>
+              )}
+              {cardAmount && cardAmount > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+                  <span>Card:</span>
+                  <span>MUR {cardAmount.toFixed(2)}</span>
+                </div>
+              )}
+              {cashChange !== undefined && cashChange > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px", fontWeight: "bold" }}>
+                  <span>Change:</span>
+                  <span>MUR {cashChange.toFixed(2)}</span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
 
-      <div style={{ textAlign: "center", borderTop: "2px solid #000", paddingTop: "8px", fontSize: "11px" }}>
-        <p style={{ margin: "4px 0" }}>Thank you for your purchase!</p>
-        <p style={{ margin: "4px 0" }}>Please come again</p>
-      </div>
+        <div style={{ textAlign: "center", borderTop: "2px solid #000", paddingTop: "8px", fontSize: "11px" }}>
+          <p style={{ margin: "4px 0" }}>Thank you for your purchase!</p>
+          <p style={{ margin: "4px 0" }}>Please come again</p>
+          <div style={{ display: "flex", justifyContent: "center", marginTop: "16px" }}>
+            <Barcode value={saleNumber} width={1} height={40} fontSize={12} displayValue={true} />
+          </div>
+        </div>
       </div>
     </>
   )

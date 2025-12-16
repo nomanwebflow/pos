@@ -16,9 +16,9 @@ export async function GET(request: Request) {
     const fullData = searchParams.get('full') === 'true'
 
     if (fullData) {
-      // Get categories from categories table with full details
+      // Get categories from ProductCategory table with full details
       const { data: categories, error } = await supabase
-        .from('categories')
+        .from('ProductCategory')
         .select('*')
         .order('name', { ascending: true })
 
@@ -30,24 +30,27 @@ export async function GET(request: Request) {
       return NextResponse.json(categories || [])
     }
 
-    // Get distinct categories from products (for backward compatibility)
-    const { data: products, error } = await supabase
-      .from('products')
-      .select('category')
-      .eq('is_active', true)
-      .not('category', 'is', null)
+    // Get distinct categories from Product table (for backward compatibility)
+    // Actually, improved logic: fetch from ProductCategory first?
+    // But sticking to existing logic pattern: query products if dynamic.
+    // However, Product table links to category via 'categoryId'.
+    // If the legacy logic meant "text based categories", we might have a mismatch.
+    // The new schema `Product` has `categoryId`. `ProductCategory` has the names.
+    // So the fallback logic of "distinct categories from products" is legacy text-based.
+    // New system should rely on `ProductCategory`.
+    // Let's just fetch from `ProductCategory` for the simple list too.
+
+    const { data: categories, error } = await supabase
+      .from('ProductCategory')
+      .select('name')
+      .order('name', { ascending: true })
 
     if (error) {
       console.error('Error fetching categories:', error)
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    // Extract unique categories
-    const categories = [...new Set(products?.map(p => p.category).filter(Boolean))]
-      .sort()
-      .map(name => ({ name }))
-
-    return NextResponse.json(categories)
+    return NextResponse.json(categories || [])
   } catch (error: any) {
     console.error('Error fetching categories:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })

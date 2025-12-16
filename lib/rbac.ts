@@ -1,50 +1,17 @@
 import { createClient as createServerClient } from '@/lib/supabase/server'
+import { permissions, hasPermission as checkPermission } from '@/lib/permissions'
 
-export type UserRole = 'SUPER_ADMIN' | 'CASHIER' | 'STOCK_MANAGER'
+export type UserRole = 'SUPER_ADMIN' | 'CASHIER' | 'STOCK_MANAGER' | 'OWNER'
 
 export interface UserProfile {
   id: string
   role: UserRole
   name: string
-  is_active: boolean
+  isActive: boolean
+  businessId: string
 }
 
-// Define permissions for each role
-export const ROLE_PERMISSIONS = {
-  SUPER_ADMIN: {
-    canViewReports: true,
-    canManageUsers: true,
-    canManageProducts: true,
-    canManageCustomers: true,
-    canCheckout: true,
-    canViewTransactions: true,
-    canExportData: true,
-    canAccessSettings: true,
-    canViewPayments: true,
-  },
-  CASHIER: {
-    canViewReports: false,
-    canManageUsers: false,
-    canManageProducts: false,
-    canManageCustomers: true,
-    canCheckout: true,
-    canViewTransactions: false,
-    canExportData: false,
-    canAccessSettings: false,
-    canViewPayments: false,
-  },
-  STOCK_MANAGER: {
-    canViewReports: false,
-    canManageUsers: false,
-    canManageProducts: true,
-    canManageCustomers: false,
-    canCheckout: false,
-    canViewTransactions: false,
-    canExportData: false,
-    canAccessSettings: false,
-    canViewPayments: false,
-  },
-} as const
+// ... (keep permissions object same)
 
 /**
  * Get current user's profile from Supabase
@@ -59,10 +26,10 @@ export async function getCurrentUser(): Promise<UserProfile | null> {
   if (!user) return null
 
   const { data: profile } = await supabase
-    .from('user_profiles')
+    .from('User')
     .select('*')
     .eq('id', user.id)
-    .eq('is_active', true)
+    .eq('isActive', true)
     .single()
 
   return profile as UserProfile | null
@@ -73,9 +40,9 @@ export async function getCurrentUser(): Promise<UserProfile | null> {
  */
 export function hasPermission(
   role: UserRole,
-  permission: keyof typeof ROLE_PERMISSIONS.SUPER_ADMIN
+  permission: keyof typeof permissions
 ): boolean {
-  return ROLE_PERMISSIONS[role][permission]
+  return checkPermission(role, permission)
 }
 
 /**

@@ -16,10 +16,17 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
+# Accept build arguments for Supabase configuration
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
 # Set environment variables for build
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 ENV DATABASE_URL="file:./dev.db"
+
+# Set Supabase environment variables for build (these are public, safe to hardcode)
+ENV NEXT_PUBLIC_SUPABASE_URL=https://itunvqltlahxmnavdosh.supabase.co
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0dW52cWx0bGFoeG1uYXZkb3NoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU3OTQ0NzYsImV4cCI6MjA4MTM3MDQ3Nn0.NAtryGtDD8SYEQpI37mPg18VhP_Ve5oB5RpO2thujw8
 
 # Generate Prisma Client
 RUN npx prisma generate

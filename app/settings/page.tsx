@@ -58,6 +58,7 @@ import {
   Edit,
   Trash2,
 } from "lucide-react"
+import { useUser } from "@/components/rbac"
 
 interface Business {
   id: string
@@ -75,7 +76,7 @@ interface User {
   email: string
   name: string
   role: string
-  isActive: boolean
+  isActive: boolean | number
 }
 
 export default function SettingsPage() {
@@ -102,10 +103,17 @@ export default function SettingsPage() {
     role: "SELLER",
   })
 
+  // Check permissions
+  const user = useUser()
+  const canManageSettings = true
+  const canManageUsers = user?.user?.role === 'OWNER' || user?.user?.role === 'SUPER_ADMIN'
+
   useEffect(() => {
     loadSettings()
+    if (user?.user?.role === 'OWNER' || user?.user?.role === 'SUPER_ADMIN') {
       loadUsers()
-  }, [])
+    }
+  }, [user?.user?.role])
 
   const loadSettings = async () => {
     try {
@@ -253,9 +261,7 @@ export default function SettingsPage() {
     }
   }
 
-  // Check permissions
-  const canManageSettings = true // Auth removed
-  const canManageUsers = true // Auth removed
+  // Permissions check logic moved to top of component
 
   if (!canManageSettings) {
     return (
@@ -433,16 +439,16 @@ export default function SettingsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {users.map((user) => (
-                      <TableRow key={user.id}>
-                        <TableCell className="font-medium">{user.name}</TableCell>
-                        <TableCell>{user.email}</TableCell>
+                    {users.map((userItem) => (
+                      <TableRow key={userItem.id}>
+                        <TableCell className="font-medium">{userItem.name}</TableCell>
+                        <TableCell>{userItem.email}</TableCell>
                         <TableCell>
-                          <Badge variant="outline">{user.role}</Badge>
+                          <Badge variant="outline">{userItem.role}</Badge>
                         </TableCell>
                         <TableCell>
-                          <Badge variant={user.isActive ? "default" : "secondary"}>
-                            {user.isActive ? "Active" : "Inactive"}
+                          <Badge variant={userItem.isActive ? "default" : "secondary"}>
+                            {userItem.isActive ? "Active" : "Inactive"}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
@@ -450,14 +456,14 @@ export default function SettingsPage() {
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => handleEditUser(user)}
+                              onClick={() => handleEditUser(userItem)}
                             >
                               <Edit className="h-4 w-4" />
                             </Button>
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => handleDeleteUser(user.id)}
+                              onClick={() => handleDeleteUser(userItem.id)}
                               disabled={false}
                             >
                               <Trash2 className="h-4 w-4" />

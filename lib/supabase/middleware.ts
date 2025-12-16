@@ -1,25 +1,26 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-type UserRole = 'SUPER_ADMIN' | 'CASHIER' | 'STOCK_MANAGER'
+type UserRole = 'SUPER_ADMIN' | 'CASHIER' | 'STOCK_MANAGER' | 'OWNER'
 
 interface UserProfile {
   id: string
   role: UserRole
   name: string
-  is_active: boolean
+  isActive: boolean
 }
 
 // Define route permissions
 const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
-  '/checkout': ['CASHIER'], // Only cashier can access checkout
-  '/customers': ['SUPER_ADMIN'],
-  '/products': ['SUPER_ADMIN', 'STOCK_MANAGER'],
-  '/transactions': ['SUPER_ADMIN'],
-  '/reports': ['SUPER_ADMIN'],
-  '/settings': ['SUPER_ADMIN'],
-  '/users': ['SUPER_ADMIN'],
-  '/payments': ['SUPER_ADMIN'],
+  '/checkout': ['CASHIER', 'OWNER', 'SUPER_ADMIN'], // Cashier, Owner, Admin can access checkout
+  '/customers': ['SUPER_ADMIN', 'OWNER'],
+  '/products': ['SUPER_ADMIN', 'STOCK_MANAGER', 'OWNER'],
+  '/transactions': ['SUPER_ADMIN', 'OWNER', 'CASHIER'],
+  '/refunds': ['SUPER_ADMIN', 'OWNER', 'CASHIER'],
+  '/reports': ['SUPER_ADMIN', 'OWNER'],
+  '/settings': ['SUPER_ADMIN', 'OWNER'],
+  '/users': ['SUPER_ADMIN', 'OWNER'],
+  '/payments': ['SUPER_ADMIN', 'OWNER'],
 }
 
 export async function updateSession(request: NextRequest) {
@@ -67,7 +68,8 @@ export async function updateSession(request: NextRequest) {
   // Protect routes - redirect to login if not authenticated
   if (
     !user &&
-    !pathname.startsWith('/login')
+    !pathname.startsWith('/login') &&
+    !pathname.startsWith('/signup')
   ) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
@@ -78,7 +80,7 @@ export async function updateSession(request: NextRequest) {
   if (user) {
     // Get user profile with role
     const { data: profile } = await supabase
-      .from('user_profiles')
+      .from('User')
       .select('*')
       .eq('id', user.id)
       .single()
@@ -86,7 +88,7 @@ export async function updateSession(request: NextRequest) {
     const userProfile = profile as UserProfile | null
 
     // Check if user is active
-    if (userProfile && !userProfile.is_active) {
+    if (userProfile && !userProfile.isActive) {
       const url = request.nextUrl.clone()
       url.pathname = '/login'
       url.searchParams.set('error', 'account_inactive')

@@ -35,7 +35,7 @@ function LoginForm() {
       } else if (data.user) {
         // Get user profile to redirect to appropriate page
         const { data: profile } = await supabase
-          .from('user_profiles')
+          .from('User')
           .select('role')
           .eq('id', data.user.id)
           .single()
@@ -49,10 +49,13 @@ function LoginForm() {
           } else if (profile.role === 'SUPER_ADMIN') {
             router.push('/reports')
           } else {
-            router.push('/')
+            // Force hard reload to ensure session state is clean
+            window.location.href = '/'
+            return
           }
         } else {
-          router.push('/')
+          window.location.href = '/'
+          return
         }
         router.refresh()
       }
@@ -122,26 +125,15 @@ function LoginForm() {
               {loading ? "Signing in..." : "Sign In"}
             </button>
           </form>
-          <div className="mt-6 space-y-4 text-center text-sm text-muted-foreground">
-            <p className="font-medium">Test Accounts:</p>
-            <div className="space-y-2">
-              <div className="p-2 bg-muted rounded">
-                <p className="font-semibold">Super Admin</p>
-                <p>admin@posystem.local / admin123</p>
-              </div>
-              <div className="p-2 bg-muted rounded">
-                <p className="font-semibold">Cashier</p>
-                <p>cashier@posystem.local / cashier123</p>
-              </div>
-              <div className="p-2 bg-muted rounded">
-                <p className="font-semibold">Stock Manager</p>
-                <p>stock@posystem.local / stock123</p>
-              </div>
-            </div>
+
+          <div className="mt-4 text-center text-sm">
+            <a href="/signup" className="text-primary hover:underline">
+              Register your Business
+            </a>
           </div>
         </CardContent>
       </Card>
-    </div>
+    </div >
   )
 }
 

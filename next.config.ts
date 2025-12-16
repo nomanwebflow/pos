@@ -2,10 +2,20 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: 'standalone',
-  // Set explicit turbopack root to avoid lockfile warning
-  turbopack: {
-    root: __dirname,
+  env: {
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
   },
-};
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'itunvqltlahxmnavdosh.supabase.co',
+        port: '',
+        pathname: '/storage/v1/object/public/**',
+      },
+    ],
+  },
+}
 
 export default nextConfig;

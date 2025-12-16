@@ -1,0 +1,6 @@
+Name,SKU,Category,Selling Price,Cost Price,Stock Level,Low Stock Threshold,Barcode,Description
+Wireless Headphones,WH-001,Electronics,1200.00,800.00,50,10,8901234567890,Noise cancelling wireless headphones
+Cotton T-Shirt,TS-001,Apparel,450.00,200.00,100,20,,100% Cotton basic t-shirt
+Running Shoes,RS-002,Footwear,2500.00,1500.00,30,5,8909876543210,Lightweight running shoes
+Coffee Mug,CM-003,Home & Kitchen,150.00,80.00,200,30,,Ceramic coffee mug
+USB-C Cable,Cb-004,Electronics,300.00,100.00,150,20,8901122334455,Fast charging data cable

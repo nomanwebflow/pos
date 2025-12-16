@@ -1,6 +1,9 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useUser } from "@/components/rbac"
+import { useRouter } from "next/navigation"
+import { createClient } from "@/lib/supabase/client"
 import { AppSidebar } from "@/components/app-sidebar"
 import {
   SidebarInset,
@@ -45,7 +48,11 @@ import {
   CreditCard,
   Eye,
   Tag,
+  RotateCcw,
+  Barcode,
+  LogOut,
 } from "lucide-react"
+import { RefundDialog } from "@/components/refund-dialog"
 
 interface Sale {
   id: string
@@ -85,11 +92,23 @@ export default function TransactionsPage() {
   const [sales, setSales] = useState<Sale[]>([])
   const [filteredSales, setFilteredSales] = useState<Sale[]>([])
   const [searchQuery, setSearchQuery] = useState("")
+  const [barcodeInput, setBarcodeInput] = useState("")
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0])
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0])
   const [selectedSale, setSelectedSale] = useState<SaleDetail | null>(null)
   const [isDetailOpen, setIsDetailOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [isRefundDialogOpen, setIsRefundDialogOpen] = useState(false)
+  const [refundSale, setRefundSale] = useState<any>(null)
+  const { user, loading: userLoading } = useUser()
+  const router = useRouter()
+
+  const handleLogout = async () => {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    router.push("/login")
+  }
+
 
   useEffect(() => {
     loadSales()
@@ -102,7 +121,7 @@ export default function TransactionsPage() {
   const loadSales = async () => {
     setIsLoading(true)
     try {
-      const res = await fetch(`/api/sales?startDate=${startDate}&endDate=${endDate}`)
+      const res = await fetch(`/api/sales-supabase?startDate=${startDate}&endDate=${endDate}`)
       if (res.ok) {
         const data = await res.json()
         setSales(data.sales || [])
@@ -133,9 +152,18 @@ export default function TransactionsPage() {
     loadSales()
   }
 
+  const handleBarcodeSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!barcodeInput.trim()) return
+
+    setSearchQuery(barcodeInput.trim())
+    setBarcodeInput("")
+    // Optional: trigger immediately if needed, but useEffect handles searchQuery change
+  }
+
   const viewSaleDetail = async (saleId: string) => {
     try {
-      const res = await fetch(`/api/sales?id=${saleId}`)
+      const res = await fetch(`/api/sales-supabase?id=${saleId}`)
       if (res.ok) {
         const data = await res.json()
         setSelectedSale(data)
@@ -146,10 +174,148 @@ export default function TransactionsPage() {
     }
   }
 
+  const handleRefund = async (saleId: string) => {
+    try {
+      const res = await fetch(`/api/sales-supabase?id=${saleId}`)
+      if (res.ok) {
+        const data = await res.json()
+
+        // Map Supabase response to RefundDialog expected format
+        const formattedSale = {
+          ...data,
+          items: data.SaleItem.map((item: any) => ({
+            id: item.id,
+            productName: item.Product?.name || 'Unknown Product',
+            sku: item.Product?.sku || '',
+            quantity: item.quantity,
+            quantityRefunded: item.quantityRefunded || 0,
+            unitPrice: item.unitPrice,
+            total: item.total
+          }))
+        }
+
+        setRefundSale(formattedSale)
+        setIsRefundDialogOpen(true)
+      }
+    } catch (error) {
+      console.error("Error loading sale for refund:", error)
+    }
+  }
+
+  const handleRefundSuccess = () => {
+    loadSales()
+  }
+
+
   // Calculate totals
   const totalRevenue = filteredSales.reduce((sum, sale) => sum + sale.total, 0)
   const totalTransactions = filteredSales.length
   const totalDiscount = filteredSales.reduce((sum, sale) => sum + sale.discount, 0)
+
+  if (userLoading) {
+    return <div className="flex items-center justify-center h-screen">Loading...</div>
+  }
+
+  const isCashier = user?.role === 'CASHIER'
+
+  if (isCashier) {
+    return (
+      <div className="flex flex-col h-screen bg-background">
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b bg-muted/40 px-4">
+          <h1 className="text-lg font-semibold">Sales History</h1>
+          <div className="ml-auto flex items-center gap-2">
+            <Button onClick={() => window.location.href = '/checkout'}>Back to POS</Button>
+            <Button variant="outline" size="icon" onClick={handleLogout} title="Logout">
+              <LogOut className="h-4 w-4" />
+            </Button>
+          </div>
+        </header>
+
+        <div className="flex flex-1 flex-col gap-4 p-4 overflow-y-auto">
+          {/* Barcode Scanner */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Barcode className="h-4 w-4" />
+                Quick Scan
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleBarcodeSubmit} className="flex gap-2">
+                <Input
+                  placeholder="Scan receipt barcode (Sale #)..."
+                  value={barcodeInput}
+                  onChange={(e) => setBarcodeInput(e.target.value)}
+                  className="flex-1"
+                  autoFocus={true}
+                />
+                <Button type="submit">Search</Button>
+              </form>
+            </CardContent>
+          </Card>
+
+          {/* Transactions Table (Simplified for Cashier) */}
+          <Card className="flex-1">
+            <CardHeader>
+              <CardTitle>Recent Transactions</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="mb-4">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="Search by sale number..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+              </div>
+
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Sale #</TableHead>
+                    <TableHead>Time</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredSales.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center text-muted-foreground">No transactions found</TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredSales.map((sale) => (
+                      <TableRow key={sale.id}>
+                        <TableCell className="font-medium">{sale.saleNumber}</TableCell>
+                        <TableCell>{new Date(sale.createdAt).toLocaleTimeString()}</TableCell>
+                        <TableCell className="text-right font-bold">MUR {sale.total.toFixed(2)}</TableCell>
+                        <TableCell className="text-right">
+                          <Button size="sm" variant="ghost" onClick={() => handleRefund(sale.id)} title="Refund">
+                            <RotateCcw className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Dialogs */}
+        <RefundDialog
+          sale={refundSale}
+          open={isRefundDialogOpen}
+          onOpenChange={setIsRefundDialogOpen}
+          onSuccess={handleRefundSuccess}
+        />
+      </div>
+    )
+  }
 
   return (
     <SidebarProvider>
@@ -174,6 +340,28 @@ export default function TransactionsPage() {
         </header>
 
         <div className="flex flex-1 flex-col gap-4 p-4">
+          {/* Barcode Scanner */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Barcode className="h-4 w-4" />
+                Quick Scan
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleBarcodeSubmit} className="flex gap-2">
+                <Input
+                  placeholder="Scan receipt barcode (Sale #)..."
+                  value={barcodeInput}
+                  onChange={(e) => setBarcodeInput(e.target.value)}
+                  className="flex-1"
+                  autoFocus
+                />
+                <Button type="submit">Search</Button>
+              </form>
+            </CardContent>
+          </Card>
+
           {/* Date Filter */}
           <Card>
             <CardHeader>
@@ -298,7 +486,7 @@ export default function TransactionsPage() {
                         <TableCell>
                           <Badge variant={
                             sale.paymentMethod === 'CASH' ? 'default' :
-                            sale.paymentMethod === 'CARD' ? 'secondary' : 'outline'
+                              sale.paymentMethod === 'CARD' ? 'secondary' : 'outline'
                           }>
                             {sale.paymentMethod}
                           </Badge>
@@ -322,13 +510,23 @@ export default function TransactionsPage() {
                           MUR {sale.total.toFixed(2)}
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => viewSaleDetail(sale.id)}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => viewSaleDetail(sale.id)}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleRefund(sale.id)}
+                              title="Process Refund"
+                            >
+                              <RotateCcw className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))
@@ -464,6 +662,14 @@ export default function TransactionsPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Refund Dialog */}
+      <RefundDialog
+        sale={refundSale}
+        open={isRefundDialogOpen}
+        onOpenChange={setIsRefundDialogOpen}
+        onSuccess={handleRefundSuccess}
+      />
     </SidebarProvider>
   )
 }

@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server'
+export const dynamic = 'force-dynamic'
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { v4 as uuidv4 } from 'uuid'
 
 // Generate a unique sale number (format: SALE-YYYYMMDD-XXXX)
 function generateSaleNumber() {
@@ -20,29 +23,43 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Verify user has permission (SUPER_ADMIN or CASHIER can create transactions)
+    // Verify user has permission (SUPER_ADMIN, CASHIER, or OWNER can create transactions)
     const { data: profile } = await supabase
       .from('user_profiles')
-      .select('role')
+      .select('role, businessId')
       .eq('id', user.id)
       .single()
 
-    if (!profile || (profile.role !== 'SUPER_ADMIN' && profile.role !== 'CASHIER')) {
+    if (!profile || (profile.role !== 'SUPER_ADMIN' && profile.role !== 'CASHIER' && profile.role !== 'OWNER')) {
       return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
     }
 
+    if (!profile.businessId) {
+      return NextResponse.json({ error: 'User does not belong to a business' }, { status: 400 })
+    }
+
     const saleNumber = generateSaleNumber()
+    const transactionId = uuidv4()
 
     // Create transaction
     const { data: transaction, error: transactionError } = await supabase
-      .from('transactions')
+      .from('Sale')
       .insert({
-        total_amount: data.total,
-        payment_method: data.paymentMethod,
+        id: transactionId,
+        total: data.total,
+        subtotal: data.subtotal,
+        taxAmount: data.taxAmount,
+        discount: data.discount || 0,
+        paymentMethod: data.paymentMethod,
+        cardAmount: data.cardAmount,
+        cashReceived: data.cashReceived,
+        cashChange: data.cashChange,
         status: 'completed',
         notes: data.notes || null,
-        customer_id: data.customerId || null,
-        created_by: user.id,
+        customerId: data.customerId || null,
+        userId: user.id,
+        saleNumber: saleNumber,
+        businessId: profile.businessId,
       })
       .select()
       .single()
@@ -56,13 +73,16 @@ export async function POST(request: Request) {
     const itemPromises = data.items.map(async (item: any) => {
       // Insert transaction item
       const { error: itemError } = await supabase
-        .from('transaction_items')
+        .from('SaleItem')
         .insert({
-          transaction_id: transaction.id,
-          product_id: item.productId,
+          id: uuidv4(),
+          saleId: transaction.id,
+          productId: item.productId,
           quantity: item.quantity,
-          unit_price: item.unitPrice,
+          unitPrice: item.unitPrice,
           subtotal: item.subtotal,
+          taxAmount: item.taxAmount || 0,
+          total: item.total || item.subtotal,
         })
 
       if (itemError) {
@@ -72,18 +92,21 @@ export async function POST(request: Request) {
 
       // Update product stock
       const { data: product } = await supabase
-        .from('products')
-        .select('stock_quantity')
+        .from('Product')
+        .select('stockLevel')
         .eq('id', item.productId)
         .single()
 
       if (product) {
-        const newStock = product.stock_quantity - item.quantity
+        // stockLevel might be null for non-inventory items, treat as 0 or skip? 
+        // Assuming products have stockLevel.
+        const currentStock = product.stockLevel || 0
+        const newStock = currentStock - item.quantity
         const { error: stockError } = await supabase
-          .from('products')
+          .from('Product')
           .update({
-            stock_quantity: newStock,
-            updated_at: new Date().toISOString(),
+            stockLevel: newStock,
+            updatedAt: new Date().toISOString(),
           })
           .eq('id', item.productId)
 
@@ -121,28 +144,34 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Verify user has permission (SUPER_ADMIN can view all transactions)
+    // Verify user has permission (SUPER_ADMIN or OWNER can view all transactions)
     const { data: profile } = await supabase
       .from('user_profiles')
       .select('role')
       .eq('id', user.id)
       .single()
 
-    if (!profile || profile.role !== 'SUPER_ADMIN') {
+    if (!profile || (profile.role !== 'SUPER_ADMIN' && profile.role !== 'OWNER' && profile.role !== 'CASHIER')) {
       return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
     }
 
     if (saleId) {
+      // Use service role to bypass RLS for SaleItem fetch logic which might be restrictive for Cashiers
+      const adminClient = createAdminClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+      )
+
       // Get specific sale with items
-      const { data: transaction, error } = await supabase
-        .from('transactions')
+      const { data: transaction, error } = await adminClient
+        .from('Sale')
         .select(`
           *,
-          transaction_items (
+          SaleItem (
             *,
-            products (name, sku)
+            Product (name, sku)
           ),
-          customers (name, email, phone)
+          Customer (name, email, phone)
         `)
         .eq('id', saleId)
         .single()
@@ -157,24 +186,26 @@ export async function GET(request: Request) {
 
     // Get sales list with optional date range
     let query = supabase
-      .from('transactions')
+      .from('Sale')
       .select(`
         *,
-        transaction_items (count)
+        SaleItem (count)
       `)
-      .order('created_at', { ascending: false })
+      .order('createdAt', { ascending: false })
       .limit(100)
 
     if (startDate && endDate) {
+      // Ensure endDate includes the full day
+      const endDateTime = endDate.includes('T') ? endDate : `${endDate}T23:59:59`
       query = query
-        .gte('created_at', startDate)
-        .lte('created_at', endDate)
+        .gte('createdAt', startDate)
+        .lte('createdAt', endDateTime)
     } else {
       // Default to today's sales
       const today = new Date().toISOString().split('T')[0]
       query = query
-        .gte('created_at', `${today}T00:00:00`)
-        .lte('created_at', `${today}T23:59:59`)
+        .gte('createdAt', `${today}T00:00:00`)
+        .lte('createdAt', `${today}T23:59:59`)
     }
 
     const { data: sales, error } = await query
@@ -187,9 +218,9 @@ export async function GET(request: Request) {
     // Calculate stats
     const stats = {
       totalSales: sales?.length || 0,
-      totalRevenue: sales?.reduce((sum, sale) => sum + parseFloat(sale.total_amount?.toString() || '0'), 0) || 0,
+      totalRevenue: sales?.reduce((sum, sale) => sum + parseFloat(sale.total?.toString() || '0'), 0) || 0,
       totalItems: sales?.reduce((sum, sale) => {
-        const itemCount = sale.transaction_items?.[0]?.count || 0
+        const itemCount = sale.SaleItem?.[0]?.count || 0
         return sum + itemCount
       }, 0) || 0,
     }

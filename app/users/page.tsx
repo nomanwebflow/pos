@@ -20,6 +20,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { UserPlus, Shield, UserCog, Edit, Trash2 } from "lucide-react"
 import { usePermission } from "@/components/rbac"
 import { Button } from "@/components/ui/button"
+import { toast } from "sonner"
 
 interface User {
   id: string
@@ -91,13 +92,14 @@ export default function UsersPage() {
         setIsDialogOpen(false)
         setFormData({ email: "", name: "", password: "", newPassword: "", role: "CASHIER" })
         loadUsers()
+        toast.success("User created successfully")
       } else {
         const error = await res.json()
-        alert(error.error || "Failed to create user")
+        toast.error(error.error || "Failed to create user")
       }
     } catch (error) {
       console.error("Error creating user:", error)
-      alert("Failed to create user")
+      toast.error("Failed to create user")
     }
   }
 
@@ -116,7 +118,7 @@ export default function UsersPage() {
 
   const handleUpdate = async () => {
     if (!verificationPassword) {
-      alert("Please enter your password to verify")
+      toast.error("Please enter your password to verify")
       return
     }
 
@@ -155,18 +157,19 @@ export default function UsersPage() {
         setIsEditMode(false)
         setSelectedUser(null)
         loadUsers()
+        toast.success("User updated successfully")
       } else {
         console.error("Update failed:", { status: res.status, error: responseData })
         if (responseData.error === "Invalid password") {
-          alert("Invalid password. Please try again.")
+          toast.error("Invalid password. Please try again.")
           setVerificationPassword("")
         } else {
-          alert(responseData.error || "Failed to update user")
+          toast.error(responseData.error || "Failed to update user")
         }
       }
     } catch (error) {
       console.error("Error updating user:", error)
-      alert("Failed to update user: " + (error instanceof Error ? error.message : "Unknown error"))
+      toast.error("Failed to update user: " + (error instanceof Error ? error.message : "Unknown error"))
     }
   }
 
@@ -181,7 +184,7 @@ export default function UsersPage() {
 
   const confirmDelete = async () => {
     if (!verificationPassword) {
-      alert("Please enter your password to verify")
+      toast.error("Please enter your password to verify")
       return
     }
 
@@ -198,18 +201,19 @@ export default function UsersPage() {
         setVerificationPassword("")
         setSelectedUser(null)
         loadUsers()
+        toast.success("User deactivated successfully")
       } else {
         console.error("Delete failed:", { status: res.status, error: responseData })
         if (responseData.error === "Invalid password") {
-          alert("Invalid password. Please try again.")
+          toast.error("Invalid password. Please try again.")
           setVerificationPassword("")
         } else {
-          alert(responseData.error || "Failed to deactivate user")
+          toast.error(responseData.error || "Failed to deactivate user")
         }
       }
     } catch (error) {
       console.error("Error deactivating user:", error)
-      alert("Failed to deactivate user: " + (error instanceof Error ? error.message : "Unknown error"))
+      toast.error("Failed to deactivate user: " + (error instanceof Error ? error.message : "Unknown error"))
     }
   }
 
@@ -316,11 +320,10 @@ export default function UsersPage() {
                         {user.role.replace(/_/g, " ")}
                       </span>
                       <span
-                        className={`px-2 py-1 text-xs rounded ${
-                          user.isActive
-                            ? "bg-green-100 text-green-800"
-                            : "bg-red-100 text-red-800"
-                        }`}
+                        className={`px-2 py-1 text-xs rounded ${user.isActive
+                          ? "bg-green-100 text-green-800"
+                          : "bg-red-100 text-red-800"
+                          }`}
                       >
                         {user.isActive ? "Active" : "Inactive"}
                       </span>
@@ -462,7 +465,6 @@ export default function UsersPage() {
                 >
                   <option value="CASHIER">Cashier</option>
                   <option value="STOCK_MANAGER">Stock Manager</option>
-                  <option value="SUPER_ADMIN">Super Admin</option>
                 </select>
               </div>
               <div className="flex gap-2 justify-end">

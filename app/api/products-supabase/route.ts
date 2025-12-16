@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { v4 as uuidv4 } from 'uuid'
+
+export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
   try {
@@ -8,18 +11,43 @@ export async function GET(request: Request) {
     const query = searchParams.get('q')
     const category = searchParams.get('category')
     const barcode = searchParams.get('barcode')
+    const status = searchParams.get('status') || 'active'
 
     // Check authentication
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+    // Verify user has permission
+    const { data: profile } = await supabase
+      .from('user_profiles')
+      .select('role, businessId')
+      .eq('id', user.id)
+      .single()
+
+    if (!profile) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    if (!profile.businessId) {
+      // Super admin might not have businessId, but POS users MUST.
+      // If SUPER_ADMIN, maybe they want to see all? Or their own?
+      // Let's assume strict isolation: User only sees their business.
+      return NextResponse.json([])
+    }
 
     let productsQuery = supabase
-      .from('products')
+      .from('Product')
       .select('*')
-      .eq('is_active', true)
+      .eq('businessId', profile.businessId)
       .order('name', { ascending: true })
+
+    if (status === 'active') {
+      productsQuery = productsQuery.eq('isActive', true)
+    } else if (status === 'draft') {
+      productsQuery = productsQuery.eq('isActive', false)
+    }
+    // if status === 'all', apply no filter
 
     if (barcode) {
       productsQuery = productsQuery.eq('sku', barcode)
@@ -45,9 +73,13 @@ export async function GET(request: Request) {
       sku: p.sku || '',
       barcode: p.sku, // Using SKU as barcode
       category: p.category,
-      sellingPrice: parseFloat(p.price?.toString() || '0'),
-      stockLevel: p.stock_quantity || 0,
-      taxable: 1, // All products are taxable by default
+      sellingPrice: parseFloat(p.sellingPrice?.toString() || '0'),
+      costPrice: parseFloat(p.costPrice?.toString() || '0'),
+      stockLevel: p.stockLevel || 0,
+      lowStockThreshold: p.lowStockThreshold || 10,
+      isActive: p.isActive === true || p.isActive === 1 ? 1 : 0,
+      taxable: p.taxable ? 1 : 0,
+      imageUrl: p.imageUrl || null,
     })) || []
 
     return NextResponse.json(transformedProducts)
@@ -57,29 +89,48 @@ export async function GET(request: Request) {
   }
 }
 
+// Helper to get business ID
+async function getBusinessId(supabase: any) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+
+  const { data: profile } = await supabase
+    .from('User')
+    .select('businessId')
+    .eq('id', user.id)
+    .single()
+
+  return profile?.businessId
+}
+
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
     const data = await request.json()
 
-    // Check authentication
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // Check authentication and Get Business ID
+    const businessId = await getBusinessId(supabase)
+    if (!businessId) {
+      return NextResponse.json({ error: 'Unauthorized or Business not found' }, { status: 401 })
     }
 
     // Insert product
     const { data: product, error } = await supabase
-      .from('products')
+      .from('Product')
       .insert({
+        id: uuidv4(),
         name: data.name,
         description: data.description,
-        price: data.sellingPrice,
-        stock_quantity: data.stockLevel || 0,
+        sellingPrice: data.sellingPrice,
+        costPrice: data.costPrice,
+        stockLevel: data.stockLevel || 0,
+        lowStockThreshold: data.lowStockThreshold || 10,
         sku: data.sku,
         category: data.category,
-        is_active: true,
-        created_by: user.id,
+        isActive: true,
+        businessId: businessId, // Use fetched businessId
+        imageUrl: data.imageUrl || null,
+        updatedAt: new Date().toISOString(),
       })
       .select()
       .single()
@@ -110,15 +161,19 @@ export async function PATCH(request: Request) {
 
     // Update product
     const { data: product, error } = await supabase
-      .from('products')
+      .from('Product')
       .update({
         name: updates.name,
         description: updates.description,
-        price: updates.sellingPrice,
-        stock_quantity: updates.stockLevel,
+        sellingPrice: updates.sellingPrice,
+        costPrice: updates.costPrice,
+        stockLevel: updates.stockLevel,
+        lowStockThreshold: updates.lowStockThreshold,
         sku: updates.sku,
         category: updates.category,
-        updated_at: new Date().toISOString(),
+        isActive: updates.isActive,
+        imageUrl: updates.imageUrl,
+        updatedAt: new Date().toISOString(),
       })
       .eq('id', id)
       .select()

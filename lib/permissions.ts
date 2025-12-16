@@ -5,10 +5,11 @@ export const permissions = {
   viewDashboard: ["SUPER_ADMIN"],
 
   // Checkout/Sales permissions
-  viewCheckout: ["CASHIER"], // Only cashier can checkout
-  createSale: ["CASHIER"],
-  viewSales: ["SUPER_ADMIN"], // Super admin can read all sales data
-  refundSale: ["SUPER_ADMIN"],
+  viewCheckout: ["CASHIER", "OWNER"], // Only cashier and owner can checkout
+  createSale: ["CASHIER", "OWNER"],
+  viewSales: ["SUPER_ADMIN", "OWNER"], // Super admin and owner can read all sales data
+  refundSale: ["SUPER_ADMIN", "OWNER"],
+  processRefund: ["SUPER_ADMIN", "OWNER", "CASHIER"],
 
   // Product permissions
   viewProducts: ["SUPER_ADMIN", "STOCK_MANAGER"],
@@ -27,8 +28,9 @@ export const permissions = {
   viewDetailedReports: ["SUPER_ADMIN"],
 
   // Transactions/Payments
-  viewTransactions: ["SUPER_ADMIN"],
-  viewPayments: ["SUPER_ADMIN"],
+  viewTransactions: ["SUPER_ADMIN", "OWNER", "CASHIER"],
+  viewPayments: ["SUPER_ADMIN", "OWNER"],
+  viewRefunds: ["SUPER_ADMIN", "OWNER", "CASHIER"],
 
   // User management (Super Admin only)
   viewUsers: ["SUPER_ADMIN"],
@@ -45,13 +47,16 @@ export const permissions = {
   viewStockMovements: ["SUPER_ADMIN", "STOCK_MANAGER"],
 } as const
 
-export type UserRole = "SUPER_ADMIN" | "CASHIER" | "STOCK_MANAGER"
+export type UserRole = "SUPER_ADMIN" | "CASHIER" | "STOCK_MANAGER" | "OWNER"
 
 // Check if user has permission (client-safe version)
 export function hasPermission(
   userRole: string,
   permission: keyof typeof permissions
 ): boolean {
+  // OWNER has all permissions
+  if (userRole === "OWNER") return true
+
   const allowedRoles = permissions[permission] as readonly string[]
   return allowedRoles.includes(userRole)
 }

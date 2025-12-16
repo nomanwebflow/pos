@@ -6,7 +6,7 @@ README.md
 .next
 .git
 .gitignore
-.env*.local
+.env.local
 .vscode
 .idea
 *.log
