@@ -6,15 +6,16 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // User Roles: SUPER_ADMIN, SELLER, STOCK_MANAGER, FINANCE, OWNER
 enum UserRole {
   SUPER_ADMIN
-  SELLER
+  CASHIER
   STOCK_MANAGER
-  FINANCE
   OWNER
 }
 
@@ -71,7 +72,7 @@ model User {
   email         String    @unique
   name          String
   password      String
-  role          UserRole  @default(SELLER)
+  role          UserRole  @default(CASHIER)
   isActive      Boolean   @default(true)
   businessId    String
   business      Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -82,6 +83,9 @@ model User {
   stockMovements StockMovement[]
   auditLogs     AuditLog[]
   refunds       Refund[]
+
+  @@index([businessId, role])
+  @@index([businessId, isActive])
 }
 
 // Product Categories
@@ -102,7 +106,7 @@ model ProductCategory {
 model Product {
   id              String    @id @default(cuid())
   name            String
-  sku             String    @unique
+  sku             String    // Removed @unique to allow per-business SKUs
   barcode         String?   @unique
   imageUrl        String?
   description     String?
@@ -121,6 +125,11 @@ model Product {
   saleItems       SaleItem[]
   stockMovements  StockMovement[]
   refundItems     RefundItem[]
+
+  @@unique([businessId, sku]) // SKU unique per business
+  @@index([businessId, isActive])
+  @@index([businessId, category])
+  @@index([barcode])
 }
 
 // Customer Management
@@ -139,6 +148,10 @@ model Customer {
   updatedAt       DateTime  @updatedAt
 
   sales           Sale[]
+
+  @@index([businessId, isActive])
+  @@index([email])
+  @@index([phone])
 }
 
 // Sales Transaction
@@ -163,9 +176,14 @@ model Sale {
   refundStatus    RefundStatus  @default(NONE)
   totalRefunded   Float         @default(0)
   createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   saleItems       SaleItem[]
   refunds         Refund[]
+
+  @@index([businessId, createdAt])
+  @@index([businessId, userId])
+  @@index([customerId])
 }
 
 // Sale Line Items
@@ -182,6 +200,9 @@ model SaleItem {
   total            Float
   quantityRefunded Int      @default(0)
   createdAt        DateTime @default(now())
+
+  @@index([saleId])
+  @@index([productId])
 }
 
 // Stock Movement Tracking
@@ -198,6 +219,9 @@ model StockMovement {
   userId          String
   user            User              @relation(fields: [userId], references: [id])
   createdAt       DateTime          @default(now())
+
+  @@index([productId])
+  @@index([type])
 }
 
 // Settings
@@ -223,6 +247,9 @@ model AuditLog {
   userId          String
   user            User     @relation(fields: [userId], references: [id])
   createdAt       DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([userId])
 }
 
 // Refund Transaction
@@ -243,8 +270,13 @@ model Refund {
   businessId      String
   business        Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
   createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   refundItems     RefundItem[]
+
+  @@index([businessId, createdAt])
+  @@index([saleId])
+  @@index([userId])
 }
 
 // Refund Line Items
@@ -261,4 +293,7 @@ model RefundItem {
   taxAmount        Float
   total            Float
   createdAt        DateTime @default(now())
+
+  @@index([refundId])
+  @@index([productId])
 }

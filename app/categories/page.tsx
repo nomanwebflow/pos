@@ -145,6 +145,9 @@ export default function CategoriesPage() {
         ...(editingCategory ? { id: editingCategory.id } : {})
       }
 
+      console.log('[Category Edit] Editing category:', editingCategory)
+      console.log('[Category Edit] Request body:', body)
+
       const res = await fetch("/api/categories", {
         method,
         headers: { "Content-Type": "application/json" },

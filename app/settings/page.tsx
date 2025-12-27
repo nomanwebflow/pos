@@ -100,7 +100,7 @@ export default function SettingsPage() {
     email: "",
     name: "",
     password: "",
-    role: "SELLER",
+    role: "CASHIER",
   })
 
   // Check permissions
@@ -120,16 +120,23 @@ export default function SettingsPage() {
       const res = await fetch("/api/settings")
       if (res.ok) {
         const data = await res.json()
-        setBusiness(data.business)
-        setBusinessForm({
-          name: data.business.name || "",
-          address: data.business.address || "",
-          phone: data.business.phone || "",
-          email: data.business.email || "",
-          taxNumber: data.business.taxNumber || "",
-          currency: data.business.currency || "MUR",
-          taxRate: data.business.taxRate?.toString() || "15",
-        })
+        // Add null safety check
+        if (data.business) {
+          setBusiness(data.business)
+          setBusinessForm({
+            name: data.business.name || "",
+            address: data.business.address || "",
+            phone: data.business.phone || "",
+            email: data.business.email || "",
+            taxNumber: data.business.taxNumber || "",
+            currency: data.business.currency || "MUR",
+            taxRate: data.business.taxRate?.toString() || "15",
+          })
+        } else {
+          console.error("Business data not found")
+        }
+      } else if (res.status === 404) {
+        console.error("Business not found in database")
       }
     } catch (error) {
       console.error("Error loading settings:", error)
@@ -202,7 +209,7 @@ export default function SettingsPage() {
           setIsUserDialogOpen(false)
           loadUsers()
           setEditingUser(null)
-          setUserForm({ email: "", name: "", password: "", role: "SELLER" })
+          setUserForm({ email: "", name: "", password: "", role: "CASHIER" })
         } else {
           alert("Error updating user")
         }
@@ -217,7 +224,7 @@ export default function SettingsPage() {
         if (res.ok) {
           setIsUserDialogOpen(false)
           loadUsers()
-          setUserForm({ email: "", name: "", password: "", role: "SELLER" })
+          setUserForm({ email: "", name: "", password: "", role: "CASHIER" })
         } else {
           const error = await res.json()
           alert(error.error || "Error creating user")
@@ -405,78 +412,7 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          {/* User Management */}
-          {canManageUsers && (
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Users className="h-5 w-5" />
-                    <div>
-                      <CardTitle>User Management</CardTitle>
-                      <CardDescription>Manage system users and their roles</CardDescription>
-                    </div>
-                  </div>
-                  <Button onClick={() => {
-                    setEditingUser(null)
-                    setUserForm({ email: "", name: "", password: "", role: "SELLER" })
-                    setIsUserDialogOpen(true)
-                  }}>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Add User
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Role</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {users.map((userItem) => (
-                      <TableRow key={userItem.id}>
-                        <TableCell className="font-medium">{userItem.name}</TableCell>
-                        <TableCell>{userItem.email}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline">{userItem.role}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={userItem.isActive ? "default" : "secondary"}>
-                            {userItem.isActive ? "Active" : "Inactive"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex gap-2 justify-end">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleEditUser(userItem)}
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleDeleteUser(userItem.id)}
-                              disabled={false}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          )}
+          {/* Note: User management is now on the dedicated /users page */}
 
           {/* System Information */}
           <Card>
@@ -562,7 +498,7 @@ export default function SettingsPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="SELLER">Seller</SelectItem>
+                    <SelectItem value="CASHIER">Cashier</SelectItem>
                     <SelectItem value="STOCK_MANAGER">Stock Manager</SelectItem>
                     <SelectItem value="FINANCE">Finance</SelectItem>
                     <SelectItem value="OWNER">Owner</SelectItem>
@@ -581,7 +517,7 @@ export default function SettingsPage() {
                 onClick={() => {
                   setIsUserDialogOpen(false)
                   setEditingUser(null)
-                  setUserForm({ email: "", name: "", password: "", role: "SELLER" })
+                  setUserForm({ email: "", name: "", password: "", role: "CASHIER" })
                 }}
               >
                 Cancel

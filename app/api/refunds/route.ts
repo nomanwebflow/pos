@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { v4 as uuidv4 } from 'uuid'
+import { RefundCreateSchema } from '@/lib/validations'
+import { differenceInCalendarDays } from 'date-fns'
+
 
 export const dynamic = 'force-dynamic'
 
@@ -126,15 +129,17 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Permission denied' }, { status: 403 })
         }
 
-        const body = await request.json()
-        const { saleId, items, paymentMethod, reason, notes } = body
+        const json = await request.json()
+        const validation = RefundCreateSchema.safeParse(json)
 
-        if (!saleId || !items || items.length === 0 || !reason) {
-            return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+        if (!validation.success) {
+            return NextResponse.json({
+                error: 'Validation Error',
+                details: validation.error.format()
+            }, { status: 400 })
         }
-        if (reason.length < 10) {
-            return NextResponse.json({ error: 'Reason must be at least 10 characters' }, { status: 400 })
-        }
+
+        const { saleId, items, paymentMethod, reason, notes } = validation.data
 
         // Fetch sale
         const { data: sale, error: saleError } = await supabase
@@ -176,21 +181,37 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Business settings not found for this sale' }, { status: 500 })
         }
 
-        // Check refund time limit
+        // Check refund time limit (Robust Calendar Days Check)
         if (business.refundTimeLimit) {
-            const daysSinceSale = (Date.now() - new Date(sale.createdAt).getTime()) / (1000 * 60 * 60 * 24)
+            const daysSinceSale = differenceInCalendarDays(new Date(), new Date(sale.createdAt))
             if (daysSinceSale > business.refundTimeLimit) {
                 return NextResponse.json({
-                    error: `Refund period expired. Limit is ${business.refundTimeLimit} days.`
+                    error: `Refund period expired. Limit is ${business.refundTimeLimit} days.`,
+                    details: {
+                        daysSinceSale,
+                        limit: business.refundTimeLimit
+                    }
                 }, { status: 400 })
             }
         }
 
-        // Validate items and calculate amounts
+        // Feature #9: Payment Method Validation (Strict Match)
+        // Only enforce if original was NOT Mixed. If Mixed, any method is fine (simplified).
+        // Also allow CASH refund for any method if business prefers, but here we enforce match for now as per "Strict" option requested often.
+        // Actually, let's allow "CASH" for "CARD" sales commonly? No, strict is safer to prevent fraud.
+        if (sale.paymentMethod !== 'MIXED' && paymentMethod !== sale.paymentMethod) {
+            return NextResponse.json({
+                error: `Payment method mismatch. Original sale was '${sale.paymentMethod}', cannot refund via '${paymentMethod}'.`,
+                details: 'Refunds must use the same payment method as the original sale.'
+            }, { status: 400 })
+        }
+
+
+        // Validate items and calculate amounts - PROPORTIONAL TAX & VALIDATION
         let refundSubtotal = 0
         let refundTax = 0
         const refundItemsData: any[] = []
-        const taxRate = Number(business.taxRate) || 0
+        // const taxRate = Number(business.taxRate) || 0 // No longer used for recalculation
 
         for (const item of items) {
             const saleItem = sale.saleItems.find((si: any) => si.id === item.saleItemId)
@@ -207,8 +228,18 @@ export async function POST(request: Request) {
 
             const unitPrice = Number(saleItem.unitPrice)
             const itemSubtotal = unitPrice * item.quantityToRefund
-            const itemTax = itemSubtotal * (taxRate / 100)
+
+            // Fix: Proportional Tax Calculation
+            // Instead of recalculating with potentially changed rate, use original tax amount
+            const taxPerUnit = saleItem.quantity > 0 ? (Number(saleItem.taxAmount) / saleItem.quantity) : 0
+            const itemTax = taxPerUnit * item.quantityToRefund
+
             const itemTotal = itemSubtotal + itemTax
+
+            // Validation: Negative amounts (sanity check)
+            if (itemSubtotal < 0 || itemTax < 0 || itemTotal < 0) {
+                return NextResponse.json({ error: `Invalid negative amount calculated for item` }, { status: 400 })
+            }
 
             refundSubtotal += itemSubtotal
             refundTax += itemTax
@@ -224,114 +255,112 @@ export async function POST(request: Request) {
             })
         }
 
-        const refundTotal = refundSubtotal + refundTax // Total refund amount for this transaction
+        const refundTotal = refundSubtotal + refundTax
 
-        // Determine new Refund Status for the Sale
-        // We need to check if *after* this refund, everything is refunded.
-        let allItemsFullyRefunded = true
-        for (const si of sale.saleItems) {
-            const refundingItem = items.find((i: any) => i.saleItemId === si.id)
-            const qtyRefundedAfter = (si.quantityRefunded || 0) + (refundingItem ? refundingItem.quantityToRefund : 0)
-            if (qtyRefundedAfter < si.quantity) {
-                allItemsFullyRefunded = false
-                break
-            }
+        // Validation: Global Negative Check
+        if (refundTotal <= 0) {
+            return NextResponse.json({ error: `Refund total must be positive` }, { status: 400 })
         }
-        const newSaleRefundStatus = allItemsFullyRefunded ? 'FULL' : 'PARTIAL'
-        const newTotalRefunded = (Number(sale.totalRefunded) || 0) + refundTotal
 
-        // Generate Refund Number
+        // Validation: Exceeding Remaining Refundable Amount
+        const totalRefundedSoFar = Number(sale.totalRefunded) || 0
+        const remainingRefundable = (Number(sale.total) || 0) - totalRefundedSoFar
+        if (refundTotal > (remainingRefundable + 0.01)) { // 0.01 tolerance for float
+            return NextResponse.json({
+                error: `Refund amount ($${refundTotal.toFixed(2)}) exceeds remaining refundable amount ($${remainingRefundable.toFixed(2)})`
+            }, { status: 400 })
+        }
+
+
+        // Determine new Refund Status for the Sale (Feature #7 Refined)
+        // Check if Total Refunded is close to Total Sale
+        const newTotalRefunded = totalRefundedSoFar + refundTotal
+        const totalSaleAmount = Number(sale.total) || 0
+
+        let newSaleRefundStatus = 'PARTIAL'
+        if (newTotalRefunded >= (totalSaleAmount - 0.05)) { // 5 cent tolerance
+            newSaleRefundStatus = 'FULL'
+        } else if (newTotalRefunded <= 0.05) {
+            newSaleRefundStatus = 'NONE' // Should not happen here but good for logic
+        } else {
+            // Also check items logic as fallback or reinforcement?
+            // If money is full, it's full. 
+            newSaleRefundStatus = 'PARTIAL'
+        }
+
+        // Override if float math was weird but all items quantity are returned?
+        // Let's trust the amount based logic for 'FULL' as it's the financial truth.
+        if (newTotalRefunded >= (totalSaleAmount - 0.05)) {
+            newSaleRefundStatus = 'FULL'
+        }
+
+
+        // Generate Refund Number with RETRY LOGIC for Uniqueness
+        let refundNumber = ''
+        let isUnique = false
+        let retries = 0
         const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '')
-        const { count } = await supabase
-            .from('Refund')
-            .select('*', { count: 'exact', head: true })
-            .ilike('refundNumber', `REF-${dateStr}%`)
 
-        const refundNumber = `REF-${dateStr}-${String((count || 0) + 1).padStart(4, '0')}`
-        const refundId = uuidv4()
+        while (!isUnique && retries < 5) {
+            const { count } = await supabase
+                .from('Refund')
+                .select('*', { count: 'exact', head: true })
+                .ilike('refundNumber', `REF-${dateStr}%`)
 
-        // 1. Create Refund Record
-        const { error: insertError } = await supabase
-            .from('Refund')
-            .insert({
-                id: refundId,
-                refundNumber,
-                saleId,
-                refundType: newSaleRefundStatus, // This refund's type? Or the sale's status? Usually "PARTIAL" or "FULL" refers to THIS refund transaction type relative to sale? Actually usually it marks the sale status. I'll save the resulting status.
-                subtotal: refundSubtotal,
-                taxAmount: refundTax,
-                total: refundTotal,
-                paymentMethod,
-                reason,
-                notes,
-                status: 'COMPLETED',
-                processedBy: user.id,
-                businessId: profile.businessId
-            })
+            // Add random suffix if retrying to minimize collision chance
+            const suffix = retries > 0 ? `-${Math.floor(Math.random() * 1000)}` : ''
+            refundNumber = `REF-${dateStr}-${String((count || 0) + 1 + retries).padStart(4, '0')}${suffix}`
 
-        if (insertError) throw new Error(`Failed to create refund: ${insertError.message}`)
-
-        // 2. Create Refund Items
-        for (const item of refundItemsData) {
-            const { error: itemError } = await supabase
-                .from('RefundItem')
-                .insert({
-                    id: uuidv4(),
-                    refundId: refundId,
-                    productId: item.productId,
-                    quantity: item.quantity,
-                    unitPrice: item.unitPrice,
-                    subtotal: item.subtotal,
-                    taxAmount: item.taxAmount,
-                    total: item.total
-                })
-            if (itemError) console.error('Error creating refund item:', itemError)
-        }
-
-        // 3. Update Sale Items (quantityRefunded)
-        for (const item of items) {
-            const saleItem = sale.saleItems.find((si: any) => si.id === item.saleItemId)
-            await supabase
-                .from('SaleItem')
-                .update({ quantityRefunded: (saleItem.quantityRefunded || 0) + item.quantityToRefund })
-                .eq('id', item.saleItemId)
-        }
-
-        // 4. Update Sale (totalRefunded, status)
-        await supabase
-            .from('Sale')
-            .update({
-                totalRefunded: newTotalRefunded,
-                refundStatus: newSaleRefundStatus
-            })
-            .eq('id', saleId)
-
-        // 5. Restore Stock & Log Movement
-        for (const item of refundItemsData) {
-            const { data: product } = await supabase
-                .from('Product')
-                .select('stockLevel')
-                .eq('id', item.productId)
+            // Check if this number exists
+            const { data: existing } = await supabase
+                .from('Refund')
+                .select('id')
+                .eq('refundNumber', refundNumber)
                 .single()
 
-            if (product) {
-                const newStock = (product.stockLevel || 0) + item.quantity
-                await supabase
-                    .from('Product')
-                    .update({ stockLevel: newStock })
-                    .eq('id', item.productId)
-
-                await supabase.from('StockMovement').insert({
-                    type: 'REFUND',
-                    productId: item.productId,
-                    quantity: item.quantity,
-                    previousStock: product.stockLevel,
-                    newStock,
-                    reference: refundNumber,
-                    reason: `Refund: ${reason}`,
-                    userId: user.id
-                })
+            if (!existing) {
+                isUnique = true
+            } else {
+                retries++
+                await new Promise(resolve => setTimeout(resolve, 50 * retries)) // Exponential backoff
             }
+        }
+
+        if (!isUnique) {
+            return NextResponse.json({ error: 'Failed to generate unique refund number. Please try again.' }, { status: 500 })
+        }
+
+        const refundId = uuidv4()
+
+        const refundPayload = {
+            id: refundId,
+            refundNumber,
+            saleId,
+            refundType: newSaleRefundStatus,
+            subtotal: refundSubtotal,
+            taxAmount: refundTax,
+            total: refundTotal,
+            paymentMethod,
+            reason,
+            notes,
+            businessId: profile.businessId,
+            newTotalRefunded // Passed for updating Sale
+        }
+
+        const itemsPayload = refundItemsData.map(item => ({
+            ...item,
+            quantity: item.quantity, // quantityToRefund mapping
+            saleItemId: item.saleItemId // verify key name
+        }))
+
+        const { data: result, error: rpcError } = await supabase.rpc('process_refund_transaction', {
+            p_refund_data: refundPayload,
+            p_items: itemsPayload,
+            p_user_id: user.id
+        })
+
+        if (rpcError) {
+            throw new Error(`Refund RPC failed: ${rpcError.message}`)
         }
 
         return NextResponse.json({

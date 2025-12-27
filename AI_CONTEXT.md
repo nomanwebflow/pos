@@ -63,6 +63,16 @@ gcloud run deploy pos \
     - **No Sidebar**: To prevent distraction and layout shifts.
     - **Logout**: Dedicated button in header.
     - **POS Access**: "Back to POS" button.
+4.  **Performance Optimizations**:
+    - **Database Indexes**: Added to critical columns (`businessId`, `email`, `role`, `isActive`) on all major tables.
+    - **RPC Functions**: Replaced heavy Dashboard aggregations with PostgreSQL functions (`get_dashboard_stats`, `get_sales_by_date_range`).
+    - **Pagination**: Implemented `limit`/`offset` on Products and Customers APIs.
+5.  **Bulk Operations**:
+    - **CSV Import**: Robust product import with validation (5MB limit, price sanitization, duplicate detection).
+    - **Error Handling**: Detailed per-row error reporting and atomic upserts.
+6.  **Settings**:
+    - Fixed API update logic (required `.select().single()` for Supabase client).
+    - Verified form persistence.
 
 ## Pending/Future Work
 - **Refund Policy Settings**: Phase 4 items in `task.md`. Configure refund time limits/rules in Settings page.

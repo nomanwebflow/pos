@@ -336,7 +336,7 @@ export default function UsersPage() {
                           >
                             <Edit className="h-4 w-4" />
                           </Button>
-                          {user.role !== "SUPER_ADMIN" && (
+                          {user.role !== "SUPER_ADMIN" && user.role !== "OWNER" && (
                             <Button
                               size="sm"
                               variant="ghost"

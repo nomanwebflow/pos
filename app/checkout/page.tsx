@@ -46,6 +46,7 @@ import {
   CheckCircle2,
   Printer,
   ImageIcon,
+  LogOut,
 } from "lucide-react"
 import { Receipt } from "@/components/receipt"
 import { VirtualKeyboard } from "@/components/virtual-keyboard"
@@ -127,19 +128,12 @@ export default function CheckoutPage() {
     }
   }, [isLoading])
 
-  useEffect(() => {
-    if (!isLoading) {
-      loadProducts()
-      loadCategories()
-    }
-  }, [isLoading])
-
   // Removed auto-focus barcode input to allow search input focus
 
 
   const loadProducts = async () => {
     try {
-      const res = await fetch("/api/products-supabase")
+      const res = await fetch("/api/products")
       if (res.ok) {
         const data = await res.json()
         console.log('[DEBUG] Products loaded:', data.length, 'products')
@@ -157,7 +151,7 @@ export default function CheckoutPage() {
 
   const loadCategories = async () => {
     try {
-      const res = await fetch("/api/categories-supabase")
+      const res = await fetch("/api/categories")
       if (res.ok) {
         const data = await res.json()
         // Extract category names from the category objects
@@ -179,7 +173,7 @@ export default function CheckoutPage() {
     if (!barcodeInput.trim()) return
 
     try {
-      const res = await fetch(`/api/products-supabase?barcode=${encodeURIComponent(barcodeInput)}`)
+      const res = await fetch(`/api/products?barcode=${encodeURIComponent(barcodeInput)}`)
       if (res.ok) {
         const data = await res.json()
         if (data.length > 0) {
@@ -448,7 +442,7 @@ export default function CheckoutPage() {
         }))
       }
 
-      const res = await fetch("/api/sales-supabase", {
+      const res = await fetch("/api/sales", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(saleData)
@@ -551,8 +545,7 @@ export default function CheckoutPage() {
     <SidebarProvider>
       <AppSidebar />
       <SidebarInset>
-        {/* Header */}
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b">
+        <header className="flex h-16 shrink-0 items-center justify-between border-b">
           <div className="flex items-center gap-2 px-3">
             <SidebarTrigger />
             <Separator orientation="vertical" className="mr-2 h-4" />
@@ -560,6 +553,19 @@ export default function CheckoutPage() {
               <ShoppingCart className="h-5 w-5" />
               <h1 className="text-xl font-bold">Checkout</h1>
             </div>
+          </div>
+          <div className="px-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                await supabase.auth.signOut()
+                router.push("/login")
+              }}
+            >
+              <LogOut className="mr-2 h-4 w-4" />
+              Logout
+            </Button>
           </div>
         </header>
 
@@ -958,7 +964,7 @@ export default function CheckoutPage() {
                     <SelectItem value="MIXED">
                       <div className="flex items-center">
                         <Wallet className="mr-2 h-4 w-4" />
-                        Mixed (Cash + Card)
+                        Internet Banking
                       </div>
                     </SelectItem>
                   </SelectContent>

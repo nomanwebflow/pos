@@ -16,7 +16,7 @@
 node_modules/
 
 # Next.js build output
-.next/
+# .next/    ← IMPORTANT: Commented out for Cloud Run deployment (needs compiled routes)
 out/
 
 # Local development

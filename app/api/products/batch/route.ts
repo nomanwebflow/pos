@@ -1,10 +1,10 @@
-
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { productQueries } from '@/lib/db-queries'
+import { v4 as uuidv4 } from 'uuid'
 
 export const dynamic = 'force-dynamic'
 
+// Helper to get business ID
 async function getBusinessId(supabase: any) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return null
@@ -18,178 +18,415 @@ async function getBusinessId(supabase: any) {
     return profile?.businessId
 }
 
+// Helper to sanitize price values
+function cleanPrice(value: any): number {
+    if (value === null || value === undefined || value === '') return 0
+    const str = String(value)
+    // Remove currency symbols, commas, spaces
+    const cleaned = str.replace(/[$€£¥₹,\s]/g, '').replace(/,/g, '.')
+    const parsed = parseFloat(cleaned)
+    return isNaN(parsed) ? 0 : Math.max(0, parsed)
+}
+
+// Helper to parse integer with validation
+function cleanInt(value: any, defaultValue: number = 0): number {
+    if (value === null || value === undefined || value === '') return defaultValue
+    const parsed = parseInt(String(value).replace(/[^\d-]/g, ''))
+    return isNaN(parsed) ? defaultValue : parsed
+}
+
+// Helper to upload image from URL
+async function processImage(supabase: any, imageUrl: string, businessId: string, sku: string): Promise<string | null> {
+    try {
+        if (!imageUrl || !imageUrl.startsWith('http')) return imageUrl
+
+        // 1. Download image
+        const response = await fetch(imageUrl, { signal: AbortSignal.timeout(10000) })
+        if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`)
+
+        // 2. Validate Size (5MB)
+        const blob = await response.blob()
+        if (blob.size > 5 * 1024 * 1024) throw new Error('Image too large (>5MB)')
+
+        // 3. Validate Type
+        const type = blob.type
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(type)) {
+            // Fallback: If unknown type but downloaded ok, maybe try to save anyway or skip
+            // stricter check: throw new Error('Invalid image type')
+            // lenient: proceed if type is image/*
+            if (!type.startsWith('image/')) throw new Error('Invalid content type')
+        }
+
+        // 4. Upload to Supabase
+        const ext = type.split('/')[1] || 'jpg'
+        const path = `${businessId}/${sku}-${Date.now()}.${ext}`
+
+        // Convert blob to ArrayBuffer for upload
+        const arrayBuffer = await blob.arrayBuffer()
+        const buffer = Buffer.from(arrayBuffer)
+
+        const { error: uploadError } = await supabase.storage
+            .from('product-images')
+            .upload(path, buffer, { contentType: type, upsert: true })
+
+        if (uploadError) throw uploadError
+
+        // 5. Get Public URL
+        const { data: { publicUrl } } = supabase.storage
+            .from('product-images')
+            .getPublicUrl(path)
+
+        return publicUrl
+    } catch (error) {
+        console.warn(`Image processing failed for SKU ${sku}:`, error)
+        return imageUrl // Fallback to original URL
+    }
+}
+
 export async function POST(request: Request) {
     try {
         const supabase = await createClient()
-        const businessId = await getBusinessId(supabase)
 
+        // Check authentication and Get Business ID
+        const businessId = await getBusinessId(supabase)
         if (!businessId) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+            return NextResponse.json({ error: 'Unauthorized or Business not found' }, { status: 401 })
         }
 
-        const body = await request.json()
-        const { products } = body
+        const { products } = await request.json()
 
         if (!Array.isArray(products) || products.length === 0) {
-            return NextResponse.json({ error: 'No products provided' }, { status: 400 })
+            return NextResponse.json({ error: 'Products array is required' }, { status: 400 })
         }
 
-        // 1. Resolve Categories
-        // Extract all unique category names
-        const categoryNames = new Set<string>()
-        products.forEach((p: any) => {
-            if (p.category) categoryNames.add(p.category)
-        })
+        // Limit batch size
+        if (products.length > 500) {
+            return NextResponse.json({ error: 'Maximum 500 products per batch' }, { status: 400 })
+        }
 
-        const categoryMap = new Map<string, string>() // Name -> ID
+        // --- Validation Phase ---
 
-        // Create or Fetch categories
-        // Ideally we check if they exist first.
-        // For simplicity and to avoid too many queries, we can just ensure they exist.
-        // However, "ProductCategory" table isn't strictly enforced by "productQueries.createProduct" 
-        // because the "Product" table usually just stores "category" as a STRING (from legacy or checking schema).
+        // Check for duplicate SKUs within the import (Case Insensitive)
+        const skus = products.map((p: any) => String(p.sku || '').trim().toLowerCase()).filter(Boolean)
+        const duplicateSKUs = skus.filter((sku: string, index: number) => skus.indexOf(sku) !== index)
+        if (duplicateSKUs.length > 0) {
+            return NextResponse.json({
+                error: 'Duplicate SKUs found in import',
+                duplicates: [...new Set(duplicateSKUs)]
+            }, { status: 400 })
+        }
 
-        // Let's Check Schema from db-queries.ts:
-        // interface Product { ... category: string | null ... }
-        // interface ProductCategory { ... id, name ... }
+        // Check for duplicate Barcodes within the import
+        const barcodes = products
+            .map((p: any) => p.barcode ? String(p.barcode).trim() : null)
+            .filter((b): b is string => b !== null && b !== '') // Type guard
 
-        // So Product stores the Category NAME directly?
-        // Let's re-read db-queries.ts line 34: "category: string | null"
-        // And getProductsByCategory (line 176): .eq('category', category)
-
-        // IT SEEMS THE SYSTEM USES CATEGORY NAMES DIRECTLY IN THE PRODUCT TABLE?
-        // BUT there is a 'ProductCategory' table too (lines 75-83).
-        // This is a bit inconsistent in the legacy code (or I misread).
-        // If Product table has `categoryId` FK, we need ID.
-        // If it has `category` string, we just use string.
-
-        // Checking `createProduct` (line 224): `category: product.category`
-        // It seems it just inserts the string/name.
-        // So we might NOT need to look up IDs if the Product table just uses the name.
-
-        // BUT, if we want to support the "Categories" page correctly, we should probably ensure 
-        // the category exists in `ProductCategory` table too, so it shows up in lists?
-        // `productQueries.getCategories` (line 183) gets distinct categories from PRODUCT table.
-        // So `ProductCategory` table might be unused or for metadata?
-        // Wait, `categoryQueries` were mentioned in previous turns.
-
-        // Let's assume we just store the NAME in `Product.category` as per `productQueries`.
-        // So we don't need complex mapping! 
-        // We just pass the string.
+        // Check for duplicate Names within the import (Case Insensitive)
+        const names = products.map((p: any) => String(p.name || '').trim().toLowerCase()).filter(Boolean)
+        const duplicateNames = names.filter((name: string, index: number) => names.indexOf(name) !== index)
+        if (duplicateNames.length > 0) {
+            return NextResponse.json({
+                error: 'Duplicate Product Names found in import data',
+                duplicates: [...new Set(duplicateNames)]
+            }, { status: 400 })
+        }
 
         const results = {
             success: 0,
             failed: 0,
-            errors: [] as any[]
+            errors: [] as { row: number; error: string; sku?: string; name?: string }[]
         }
 
-        for (const p of products) {
-            try {
-                // Validation
-                if (!p.name || !p.price) {
-                    throw new Error(`Missing required fields for ${p.name || 'unknown product'}`)
-                }
+        // --- Fetch Existing Products (SKU, Barcode, Name) ---
+        // Fetch by SKU
+        const { data: existingProductsBySku } = await supabase
+            .from('Product')
+            .select('id, sku, stockLevel, isActive, barcode, name')
+            .eq('businessId', businessId)
+            .in('sku', products.map((p: any) => p.sku))
 
-                // Check if product exists (Duplicate check)
-                let existingProduct = null
-                if (p.sku) {
-                    existingProduct = await productQueries.getProductBySku(p.sku, businessId)
-                }
-                if (!existingProduct && p.name) {
-                    existingProduct = await productQueries.getProductByName(p.name, businessId)
-                }
+        // Fetch by Barcode (global)
+        const { data: existingProductsByBarcode } = await supabase
+            .from('Product')
+            .select('id, sku, barcode')
+            .in('barcode', barcodes)
 
-                if (existingProduct) {
-                    // Update stock for ACTIVE products (found by getProductBySku logic which filters active)
-                    const addedStock = Number(p.stock) || 0
-                    const newStock = (existingProduct.stockLevel || 0) + addedStock
-                    await productQueries.updateStock(existingProduct.id, newStock)
+        // Fetch by Name (business scoped)
+        // Note: 'in' query with lowercased names isn't directly supported on simple columns without a computed column or ILIKE ANY (which is raw SQL).
+        // Since we can't easily do efficient ILIKE ANY via standard SDK, we filter by EXACT name from CSV. This covers most Copy-Paste errors.
+        const { data: existingProductsByName } = await supabase
+            .from('Product')
+            .select('id, sku, name')
+            .eq('businessId', businessId)
+            .in('name', products.map((p: any) => String(p.name).trim()))
 
-                    // Optionally update price if provided/changed? 
-                    // User said "just update the stock value". So we skip other updates.
+        // Create Maps
+        const productMap = new Map() // Normalized SKU -> Product
+        existingProductsBySku?.forEach((p: any) => {
+            productMap.set(p.sku.toLowerCase(), p)
+        })
 
-                    results.success++
-                } else {
-                    // Create new product OR Reactivate soft-deleted one
-                    // Use upsertProduct to handle "Duplicate key" if it exists but is inactive
-                    await productQueries.upsertProduct({
-                        name: p.name,
-                        // If CSV has 'cost', map to costPrice, etc.
-                        costPrice: p.costPrice || 0,
-                        sellingPrice: Number(p.price),
-                        stockLevel: Number(p.stock) || 0,
-                        lowStockThreshold: Number(p.minStock) || 0,
-                        description: p.description || '',
-                        sku: p.sku || '',
-                        barcode: p.barcode || '',
-                        category: p.category || 'Uncategorized',
-                        taxable: p.taxable ? 1 : 0,
-                        isActive: 1,
-                        businessId: businessId
-                    })
-                    results.success++
+        const barcodeMap = new Map() // Barcode -> SKU
+        existingProductsByBarcode?.forEach((p: any) => {
+            if (p.barcode) barcodeMap.set(String(p.barcode).trim(), p.sku)
+        })
+
+        const nameMap = new Map() // Normalized Name -> SKU
+        existingProductsByName?.forEach((p: any) => {
+            nameMap.set(p.name.toLowerCase(), p.sku)
+        })
+
+
+        // --- Process Categories ---
+        // Extract unique category names from products
+        const categoryNames = [...new Set(
+            products
+                .map((p: any) => p.category ? String(p.category).trim() : null)
+                .filter((c): c is string => c !== null && c !== '')
+        )]
+
+        if (categoryNames.length > 0) {
+            // Fetch existing categories
+            const { data: existingCategories } = await supabase
+                .from('ProductCategory')
+                .select('id, name')
+                .eq('businessId', businessId)
+                .in('name', categoryNames)
+
+            const existingCategoryNames = new Set(existingCategories?.map(c => c.name) || [])
+
+            // Find new categories that don't exist
+            const newCategories = categoryNames.filter(name => !existingCategoryNames.has(name))
+
+            // Auto-create new categories
+            if (newCategories.length > 0) {
+                const categoriesToInsert = newCategories.map(name => ({
+                    id: uuidv4(),
+                    name,
+                    description: null,
+                    businessId,
+                    isActive: true,
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                }))
+
+                const { error: catError } = await supabase
+                    .from('ProductCategory')
+                    .upsert(categoriesToInsert, { onConflict: 'businessId, name' })
+
+                if (catError) {
+                    console.warn('Error auto-creating categories:', catError)
+                    // Continue anyway - category will be saved as string on product
                 }
-            } catch (err: any) {
-                console.error("Import error details:", err)
-                results.failed++
-                results.errors.push({ name: p.name, error: err.message })
             }
         }
 
-        return NextResponse.json(results)
+        // --- Main Processing Loop ---
+        // --- Image Processing (Parallel with Concurrency Limit) ---
+        // We process images before DB updates. 
+        // Simple Concurrency Limit: 5
+        const CONCURRENCY_LIMIT = 5
+        const productsWithImages = products.filter((p: any) => p.imageUrl && String(p.imageUrl).startsWith('http'))
 
+        // Process images in chunks
+        for (let i = 0; i < productsWithImages.length; i += CONCURRENCY_LIMIT) {
+            const chunk = productsWithImages.slice(i, i + CONCURRENCY_LIMIT)
+            await Promise.all(chunk.map(async (product: any) => {
+                const sku = String(product.sku || '').trim()
+                if (sku) {
+                    product.imageUrl = await processImage(supabase, product.imageUrl, businessId, sku)
+                }
+            }))
+        }
+
+        // --- Database Processing ---
+
+        for (let i = 0; i < products.length; i++) {
+            const product = products[i]
+            const rowNum = i + 1
+            const normalizedSku = String(product.sku || '').trim().toLowerCase()
+
+            try {
+                // Basic Validations
+                if (!product.name || String(product.name).trim() === '') {
+                    results.errors.push({ row: rowNum, error: 'Name is required', sku: product.sku })
+                    results.failed++
+                    continue
+                }
+                if (!product.sku || String(product.sku).trim() === '') {
+                    results.errors.push({ row: rowNum, error: 'SKU is required', name: product.name })
+                    results.failed++
+                    continue
+                }
+                // Validate name length
+                if (String(product.name).length > 200) {
+                    results.errors.push({ row: rowNum, error: 'Name too long (max 200 chars)', sku: product.sku })
+                    results.failed++
+                    continue
+                }
+                // Validate SKU length
+                if (String(product.sku).length > 50) {
+                    results.errors.push({ row: rowNum, error: 'SKU too long (max 50 chars)', sku: product.sku })
+                    results.failed++
+                    continue
+                }
+
+                // Values
+                const sellingPrice = cleanPrice(product.sellingPrice)
+                const costPrice = cleanPrice(product.costPrice)
+                const stockLevelImport = cleanInt(product.stockLevel, 0)
+                const lowStockThreshold = cleanInt(product.lowStockThreshold, 10)
+
+                if (sellingPrice < 0 || costPrice < 0 || stockLevelImport < 0 || lowStockThreshold < 0) {
+                    results.errors.push({ row: rowNum, error: 'Negative values not allowed', sku: product.sku })
+                    results.failed++
+                    continue
+                }
+
+                // Check for barcode collision against DB
+                if (product.barcode) {
+                    const barcode = String(product.barcode).trim()
+                    const existingSkuForBarcode = barcodeMap.get(barcode)
+
+                    // If barcode exists, and belongs to a DIFFERENT SKU (case-insensitive check)
+                    if (existingSkuForBarcode && existingSkuForBarcode.toLowerCase() !== normalizedSku) {
+                        results.errors.push({
+                            row: rowNum,
+                            error: `Barcode '${barcode}' is already assigned to SKU '${existingSkuForBarcode}'`,
+                            sku: product.sku
+                        })
+                        results.failed++
+                        continue
+                    }
+                }
+
+                // Check for Name collision against DB (Business Scoped)
+                const name = String(product.name).trim()
+                const existingSkuForName = nameMap.get(name.toLowerCase())
+                if (existingSkuForName && existingSkuForName.toLowerCase() !== normalizedSku) {
+                    results.errors.push({
+                        row: rowNum,
+                        error: `Product Name '${name}' is already used by SKU '${existingSkuForName}'`,
+                        sku: product.sku
+                    })
+                    results.failed++
+                    continue
+                }
+
+                // Logic for Stock and Active Status
+                let finalStockLevel = stockLevelImport
+                let isActive = product.isActive !== false
+
+                const existingProduct = productMap.get(normalizedSku)
+
+                if (existingProduct) {
+                    // Scenario 1: Product Exists
+                    if (existingProduct.isActive) {
+                        // If Active: Add stock
+                        finalStockLevel = (existingProduct.stockLevel || 0) + stockLevelImport
+                    } else {
+                        // If Inactive (Deleted): Restore and Reset stock
+                        isActive = true // Restore
+                        finalStockLevel = stockLevelImport // Use new value (Reset)
+                    }
+                }
+
+                // Prepare Data
+                const productData = {
+                    name: String(product.name).trim(),
+                    sku: String(product.sku).trim(), // Keep original case for display
+                    barcode: product.barcode ? String(product.barcode).trim() : null,
+                    description: product.description ? String(product.description).trim() : null,
+                    category: product.category ? String(product.category).trim() : null,
+                    costPrice,
+                    sellingPrice,
+                    stockLevel: finalStockLevel,
+                    lowStockThreshold,
+                    taxable: product.taxable !== false,
+                    isActive,
+                    businessId,
+                    imageUrl: product.imageUrl || null,
+                    updatedAt: new Date().toISOString(),
+                }
+
+                // DB Operation
+                const { error } = await supabase
+                    .from('Product')
+                    .upsert({
+                        ...productData,
+                        id: existingProduct?.id || uuidv4() // Use existing ID if match, else new
+                    }, { onConflict: 'sku, businessId' }) // Composite key matches DB index
+
+                if (error) {
+                    // Check for specific constraint violations
+                    if (error.message.includes('duplicate') || error.message.includes('unique')) {
+                        // We already checked Barcode/SKU pre-flight, but race conditions exist
+                        results.errors.push({ row: rowNum, error: `Database constraint violation (SKU or Barcode duplicate)`, sku: product.sku })
+                    } else {
+                        results.errors.push({ row: rowNum, error: error.message, sku: product.sku })
+                    }
+                    results.failed++
+                } else {
+                    results.success++
+                }
+
+            } catch (err: any) {
+                results.errors.push({ row: rowNum, error: err.message || 'Unknown error', sku: product.sku })
+                results.failed++
+            }
+        }
+
+        return NextResponse.json({
+            message: `Imported ${results.success} products, ${results.failed} failed`,
+            success: results.success,
+            failed: results.failed,
+            errors: results.errors
+        })
     } catch (error: any) {
-        console.error('Batch import error:', error)
+        console.error('Error batch import:', error)
         return NextResponse.json({ error: error.message }, { status: 500 })
     }
 }
 
+
 export async function DELETE(request: Request) {
     try {
         const supabase = await createClient()
-        const businessId = await getBusinessId(supabase)
 
+        // Check authentication and Get Business ID
+        const businessId = await getBusinessId(supabase)
         if (!businessId) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+            return NextResponse.json({ error: 'Unauthorized or Business not found' }, { status: 401 })
         }
 
         const body = await request.json()
         const { ids } = body
 
-        if (!Array.isArray(ids) || ids.length === 0) {
-            return NextResponse.json({ error: 'No IDs provided' }, { status: 400 })
+        if (!ids || !Array.isArray(ids) || ids.length === 0) {
+            return NextResponse.json({ error: 'Product IDs array is required' }, { status: 400 })
         }
 
-        await productQueries.deleteProducts(ids, businessId)
+        // Perform bulk soft delete
+        const { error } = await supabase
+            .from('Product')
+            .update({
+                isActive: false,
+                updatedAt: new Date().toISOString()
+            })
+            .in('id', ids)
+            .eq('businessId', businessId)
 
-        return NextResponse.json({ success: true, count: ids.length })
+        if (error) {
+            console.error('Error batch deleting products:', error)
+            return NextResponse.json({ error: error.message }, { status: 500 })
+        }
+
+        return NextResponse.json({
+            success: true,
+            message: `Successfully deleted ${ids.length} products`
+        })
     } catch (error: any) {
-        console.error('Batch delete error:', error)
-        return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-}
-
-export async function PATCH(request: Request) {
-    try {
-        const supabase = await createClient()
-        const businessId = await getBusinessId(supabase)
-
-        if (!businessId) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-        }
-
-        const body = await request.json()
-        const { ids, updates } = body
-
-        if (!Array.isArray(ids) || ids.length === 0) {
-            return NextResponse.json({ error: 'No IDs provided' }, { status: 400 })
-        }
-
-        await productQueries.updateProducts(ids, updates, businessId)
-
-        return NextResponse.json({ success: true, count: ids.length })
-    } catch (error: any) {
-        console.error('Batch update error:', error)
+        console.error('Error in batch delete handler:', error)
         return NextResponse.json({ error: error.message }, { status: 500 })
     }
 }

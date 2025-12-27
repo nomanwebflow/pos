@@ -59,6 +59,12 @@ export function ProductImportDialog({ onSuccess }: ProductImportDialogProps) {
             return
         }
 
+        // File size limit (5MB ≈ 5000 products)
+        if (file.size > 5 * 1024 * 1024) {
+            toast.error("File too large. Maximum 5MB (≈5000 products)")
+            return
+        }
+
         setIsLoading(true)
         setProgress(0)
         setSummary(null)
@@ -66,10 +72,27 @@ export function ProductImportDialog({ onSuccess }: ProductImportDialogProps) {
         Papa.parse(file, {
             header: true,
             skipEmptyLines: true,
+            transformHeader: (header) => {
+                // Remove BOM from first header (common in Excel exports)
+                return header.replace(/^\uFEFF/, '').trim()
+            },
             complete: async (results) => {
                 const data = results.data
                 if (data.length === 0) {
                     toast.error("No data found in CSV")
+                    setIsLoading(false)
+                    return
+                }
+
+                // Validate required columns exist
+                const csvColumns = Object.keys(data[0] || {})
+                const requiredColumns = ['Name', 'SKU']
+                const missingColumns = requiredColumns.filter(col =>
+                    !csvColumns.some(c => c.toLowerCase() === col.toLowerCase())
+                )
+
+                if (missingColumns.length > 0) {
+                    toast.error(`Missing required columns: ${missingColumns.join(', ')}. Found: ${csvColumns.join(', ')}`)
                     setIsLoading(false)
                     return
                 }
@@ -86,17 +109,18 @@ export function ProductImportDialog({ onSuccess }: ProductImportDialogProps) {
                     for (let i = 0; i < totalBatches; i++) {
                         const rawBatch = data.slice(i * batchSize, (i + 1) * batchSize)
 
-                        // Map CSV fields to API fields
+                        // Map CSV fields to API fields (MUST match backend expectations)
+                        // Handles various column naming conventions
                         const batch = rawBatch.map((item: any) => ({
-                            name: item['Name'] || item['name'],
-                            price: item['Selling Price'] || item['price'] || item['SellingPrice'], // handle variations
-                            costPrice: item['Cost Price'] || item['costPrice'] || item['CostPrice'],
-                            stock: item['Stock Level'] || item['stock'] || item['StockLevel'],
-                            minStock: item['Low Stock Threshold'] || item['minStock'] || item['LowStockThreshold'],
-                            sku: item['SKU'] || item['sku'],
-                            category: item['Category'] || item['category'],
-                            barcode: item['Barcode'] || item['barcode'],
-                            description: item['Description'] || item['description']
+                            name: item['Name'] || item['name'] || item['Product Name'] || item['ProductName'] || item['PRODUCT NAME'],
+                            sellingPrice: item['Selling Price'] || item['SellingPrice'] || item['sellingPrice'] || item['Price'] || item['price'] || item['SELLING PRICE'] || item['PRICE'] || item['Unit Price'] || item['UnitPrice'],
+                            costPrice: item['Cost Price'] || item['CostPrice'] || item['costPrice'] || item['Cost'] || item['cost'] || item['COST PRICE'] || item['COST'],
+                            stockLevel: item['Stock Level'] || item['StockLevel'] || item['stockLevel'] || item['Stock'] || item['stock'] || item['STOCK LEVEL'] || item['STOCK'] || item['Quantity'] || item['quantity'] || item['Qty'] || item['QTY'],
+                            lowStockThreshold: item['Low Stock Threshold'] || item['LowStockThreshold'] || item['lowStockThreshold'] || item['Min Stock'] || item['minStock'] || item['LOW STOCK THRESHOLD'] || item['Reorder Level'] || '10',
+                            sku: item['SKU'] || item['sku'] || item['Sku'] || item['Product Code'] || item['ProductCode'] || item['Code'],
+                            category: item['Category'] || item['category'] || item['CATEGORY'] || item['Product Category'],
+                            barcode: item['Barcode'] || item['barcode'] || item['BARCODE'] || item['Bar Code'] || item['EAN'] || item['UPC'],
+                            description: item['Description'] || item['description'] || item['DESCRIPTION'] || item['Product Description']
                         }))
 
                         const stats = await sendBatch(batch)

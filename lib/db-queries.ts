@@ -26,6 +26,14 @@ function getSupabase() {
   return supabaseInstance
 }
 
+function sanitizeSearchQuery(query: string): string {
+  // Remove special characters that could break the filter syntax or cause injection
+  // comma is the delimiter for OR
+  // dot is the delimiter for col.op.val
+  // brackets are for precedence
+  return query.replace(/[.,()]/g, ' ').trim()
+}
+
 export interface Product {
   id: string
   name: string
@@ -186,7 +194,8 @@ export const productQueries = {
       .select('*')
       .eq('businessId', businessId)
       .eq('isActive', true)
-      .or(`name.ilike.%${query}%,sku.ilike.%${query}%,barcode.ilike.%${query}%`)
+      .eq('isActive', true)
+      .or(`name.ilike.%${sanitizeSearchQuery(query)}%,sku.ilike.%${sanitizeSearchQuery(query)}%,barcode.ilike.%${sanitizeSearchQuery(query)}%`)
       .order('name', { ascending: true })
       .limit(50)
     return (data || []).map(mapProduct)
@@ -397,18 +406,19 @@ export const salesQueries = {
         createdAt: now
       })
 
-      // Get current stock
-      // We need accurate stock, so we fetch it again. 
-      // Race condition possible here without DB transactions, but accepting risk for now.
-      const { data: pData } = await getSupabase().from('Product').select('stockLevel').eq('id', item.productId).single()
-      const currentStock = pData?.stockLevel || 0
-      const newStock = currentStock - item.quantity
+      // Atomic Update Product Stock
+      const { data: newStock, error: stockError } = await getSupabase()
+        .rpc('decrement_stock', {
+          p_product_id: item.productId,
+          p_quantity: item.quantity
+        })
 
-      // Update Product Stock
-      await getSupabase().from('Product').update({
-        stockLevel: newStock,
-        updatedAt: now
-      }).eq('id', item.productId)
+      if (stockError) {
+        throw new Error(`Failed to update stock for product ${item.productId}: ${stockError.message}`)
+      }
+
+      // Calculate previous stock based on the result of the atomic operation
+      const previousStock = (newStock as number) + item.quantity
 
       // Log Stock Movement
       const movementId = `movement-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
@@ -417,7 +427,7 @@ export const salesQueries = {
         type: 'SALE',
         productId: item.productId,
         quantity: -item.quantity,
-        previousStock: currentStock,
+        previousStock: previousStock,
         newStock: newStock,
         userId: sale.userId,
         createdAt: now
@@ -575,7 +585,8 @@ export const customerQueries = {
       .select('*')
       .eq('businessId', businessId)
       .eq('isActive', true)
-      .or(`name.ilike.%${query}%,email.ilike.%${query}%,phone.ilike.%${query}%`)
+      .eq('isActive', true)
+      .or(`name.ilike.%${sanitizeSearchQuery(query)}%,email.ilike.%${sanitizeSearchQuery(query)}%,phone.ilike.%${sanitizeSearchQuery(query)}%`)
       .order('name', { ascending: true })
       .limit(50)
     return (data || []).map(mapCustomer)
@@ -612,12 +623,14 @@ export const customerQueries = {
     if (error) throw new Error(error.message)
   },
 
-  deleteCustomer: async (id: string) => {
+  deleteCustomer: async (id: string, businessId: string) => {
     const now = new Date().toISOString()
     const { error } = await getSupabase().from('Customer').update({
       isActive: false,
       updatedAt: now
-    }).eq('id', id)
+    })
+      .eq('id', id)
+      .eq('businessId', businessId) // Security check
     if (error) throw new Error(error.message)
   },
 

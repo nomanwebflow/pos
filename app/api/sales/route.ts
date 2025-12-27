@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { v4 as uuidv4 } from 'uuid'
+import { SaleSchema } from '@/lib/validations'
 
 // Generate a unique sale number (format: SALE-YYYYMMDD-XXXX)
 function generateSaleNumber() {
@@ -15,7 +16,17 @@ function generateSaleNumber() {
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
-    const data = await request.json()
+    const json = await request.json()
+    const validation = SaleSchema.safeParse(json)
+
+    if (!validation.success) {
+      return NextResponse.json({
+        error: 'Validation Error',
+        details: validation.error.format()
+      }, { status: 400 })
+    }
+
+    const data = validation.data
 
     // Check authentication
     const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -25,7 +36,7 @@ export async function POST(request: Request) {
 
     // Verify user has permission (SUPER_ADMIN, CASHIER, or OWNER can create transactions)
     const { data: profile } = await supabase
-      .from('user_profiles')
+      .from('User')
       .select('role, businessId')
       .eq('id', user.id)
       .single()
@@ -41,87 +52,47 @@ export async function POST(request: Request) {
     const saleNumber = generateSaleNumber()
     const transactionId = uuidv4()
 
-    // Create transaction
-    const { data: transaction, error: transactionError } = await supabase
-      .from('Sale')
-      .insert({
-        id: transactionId,
-        total: data.total,
-        subtotal: data.subtotal,
-        taxAmount: data.taxAmount,
-        discount: data.discount || 0,
-        paymentMethod: data.paymentMethod,
-        cardAmount: data.cardAmount,
-        cashReceived: data.cashReceived,
-        cashChange: data.cashChange,
-        status: 'completed',
-        notes: data.notes || null,
-        customerId: data.customerId || null,
-        userId: user.id,
-        saleNumber: saleNumber,
-        businessId: profile.businessId,
-      })
-      .select()
-      .single()
-
-    if (transactionError) {
-      console.error('Error creating transaction:', transactionError)
-      return NextResponse.json({ error: transactionError.message }, { status: 500 })
+    const salePayload = {
+      id: transactionId,
+      saleNumber,
+      subtotal: data.subtotal,
+      taxAmount: data.taxAmount,
+      discount: data.discount || 0,
+      total: data.total,
+      paymentMethod: data.paymentMethod,
+      cardAmount: data.cardAmount,
+      cashReceived: data.cashReceived,
+      cashChange: data.cashChange,
+      status: 'completed',
+      notes: data.notes || null,
+      customerId: data.customerId || null,
+      userId: user.id,
+      businessId: profile.businessId,
     }
 
-    // Create transaction items and update stock
-    const itemPromises = data.items.map(async (item: any) => {
-      // Insert transaction item
-      const { error: itemError } = await supabase
-        .from('SaleItem')
-        .insert({
-          id: uuidv4(),
-          saleId: transaction.id,
-          productId: item.productId,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          subtotal: item.subtotal,
-          taxAmount: item.taxAmount || 0,
-          total: item.total || item.subtotal,
-        })
+    const itemsPayload = data.items.map((item: any) => ({
+      id: uuidv4(),
+      productId: item.productId,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      subtotal: item.subtotal,
+      taxAmount: item.taxAmount || 0,
+      total: item.total || item.subtotal,
+    }))
 
-      if (itemError) {
-        console.error('Error creating transaction item:', itemError)
-        throw new Error(`Failed to create transaction item: ${itemError.message}`)
-      }
-
-      // Update product stock
-      const { data: product } = await supabase
-        .from('Product')
-        .select('stockLevel')
-        .eq('id', item.productId)
-        .single()
-
-      if (product) {
-        // stockLevel might be null for non-inventory items, treat as 0 or skip? 
-        // Assuming products have stockLevel.
-        const currentStock = product.stockLevel || 0
-        const newStock = currentStock - item.quantity
-        const { error: stockError } = await supabase
-          .from('Product')
-          .update({
-            stockLevel: newStock,
-            updatedAt: new Date().toISOString(),
-          })
-          .eq('id', item.productId)
-
-        if (stockError) {
-          console.error('Error updating stock:', stockError)
-          throw new Error(`Failed to update stock: ${stockError.message}`)
-        }
-      }
+    const { data: result, error: rpcError } = await supabase.rpc('create_sale_transaction', {
+      p_sale_data: salePayload,
+      p_items: itemsPayload
     })
 
-    await Promise.all(itemPromises)
+    if (rpcError) {
+      console.error('Error creating transaction (RPC):', rpcError)
+      return NextResponse.json({ error: rpcError.message }, { status: 500 })
+    }
 
     return NextResponse.json({
       success: true,
-      saleId: transaction.id,
+      saleId: transactionId,
       saleNumber,
     })
   } catch (error: any) {
@@ -146,7 +117,7 @@ export async function GET(request: Request) {
 
     // Verify user has permission (SUPER_ADMIN or OWNER can view all transactions)
     const { data: profile } = await supabase
-      .from('user_profiles')
+      .from('User')
       .select('role')
       .eq('id', user.id)
       .single()

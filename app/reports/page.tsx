@@ -255,7 +255,7 @@ export default function ReportsPage() {
           </Card>
 
           {/* Overview Stats */}
-          <div className="grid gap-4 md:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-2">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
@@ -286,35 +286,8 @@ export default function ReportsPage() {
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Discount</CardTitle>
-                <Badge className="h-4 w-4" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  MUR {overview?.totalDiscount?.toFixed(2) || 0}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Discounts given
-                </p>
-              </CardContent>
-            </Card>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Tax</CardTitle>
-                <BarChart3 className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  MUR {overview?.totalTax?.toFixed(2) || 0}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  VAT collected
-                </p>
-              </CardContent>
-            </Card>
+
           </div>
 
           {/* Payment Methods Breakdown */}
@@ -346,7 +319,7 @@ export default function ReportsPage() {
                 <div className="flex items-center gap-2">
                   <Wallet className="h-8 w-8 text-purple-600" />
                   <div>
-                    <p className="text-sm font-medium">Mixed</p>
+                    <p className="text-sm font-medium">Internet Banking</p>
                     <p className="text-2xl font-bold">
                       MUR {overview?.mixedRevenue?.toFixed(2) || 0}
                     </p>
@@ -488,6 +461,6 @@ export default function ReportsPage() {
           </Card>
         </div>
       </SidebarInset>
-    </SidebarProvider>
+    </SidebarProvider >
   )
 }

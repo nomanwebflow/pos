@@ -19,6 +19,7 @@ interface SaleItem {
     quantity: number
     quantityRefunded: number
     unitPrice: number
+    taxAmount: number
     total: number
 }
 
@@ -90,13 +91,30 @@ export function RefundDialog({ sale, open, onOpenChange, onSuccess }: RefundDial
     // Calculate refund totals
     const calculateTotals = () => {
         let subtotal = 0
+        let tax = 0
         Object.entries(selectedItems).forEach(([itemId, quantity]) => {
             const item = refundableItems.find(i => i.id === itemId)
             if (item) {
                 subtotal += item.unitPrice * quantity
+                // Proportional tax logic
+                // The API calculates tax as: (saleItem.taxAmount / saleItem.quantity) * refundQuantity
+                // We need to match this exactly.
+                // Assuming saleItem has taxAmount. Wait, the interface SaleItem above doesn't have taxAmount.
+                // I need to add taxAmount to the SaleItem interface first.
+                // For now, I will use a fallback or assume it's passed.
+                // Looking at route.ts, taxAmount IS passed: *, saleItems:SaleItem(*)
+                // But the interface in this file needs updating.
+
+                // Let's rely on the fact that `item` comes from `sale.items` which comes from API.
+                // I will cast it to any or update interface. 
+                // Updating interface is better. 
+                // But in this replace block I am only replacing this function.
+                // I will assume item comes with taxAmount and cast it if needed.
+                const taxAmount = (item as any).taxAmount || 0
+                const taxPerUnit = item.quantity > 0 ? (taxAmount / item.quantity) : 0
+                tax += taxPerUnit * quantity
             }
         })
-        const tax = subtotal * 0.15 // 15% tax
         const total = subtotal + tax
         return { subtotal, tax, total }
     }
@@ -110,8 +128,14 @@ export function RefundDialog({ sale, open, onOpenChange, onSuccess }: RefundDial
             return
         }
 
-        if (reason.trim().length < 10) {
-            toast.error("Reason must be at least 10 characters")
+        if (!reason) {
+            toast.error("Please select a reason for refund")
+            return
+        }
+
+        // If "OTHER" is selected, notes must be provided
+        if (reason === "OTHER" && (!notes || notes.trim().length < 5)) {
+            toast.error("Please specify the reason in the notes field")
             return
         }
 
@@ -133,8 +157,8 @@ export function RefundDialog({ sale, open, onOpenChange, onSuccess }: RefundDial
                     saleId: sale.id,
                     items,
                     paymentMethod,
-                    reason,
-                    notes: notes || undefined
+                    reason: reason === "OTHER" ? notes : reason,
+                    notes: reason === "OTHER" ? undefined : (notes || undefined)
                 })
             })
 
@@ -278,7 +302,7 @@ export function RefundDialog({ sale, open, onOpenChange, onSuccess }: RefundDial
                                 <SelectContent>
                                     <SelectItem value="CASH">Cash</SelectItem>
                                     <SelectItem value="CARD">Card</SelectItem>
-                                    <SelectItem value="MIXED">Mixed</SelectItem>
+                                    <SelectItem value="MIXED">Internet Banking</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -288,15 +312,31 @@ export function RefundDialog({ sale, open, onOpenChange, onSuccess }: RefundDial
                             <label className="text-sm font-medium mb-2 block">
                                 Reason for Refund <span className="text-destructive">*</span>
                             </label>
-                            <Textarea
-                                value={reason}
-                                onChange={(e) => setReason(e.target.value)}
-                                placeholder="Enter reason for refund (minimum 10 characters)..."
-                                rows={3}
-                                className={reason.length > 0 && reason.length < 10 ? 'border-destructive' : ''}
-                            />
-                            {reason.length > 0 && reason.length < 10 && (
-                                <p className="text-sm text-destructive mt-1">Reason must be at least 10 characters</p>
+                            <Select value={reason} onValueChange={setReason}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Select a reason..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="Customer changed mind">Customer changed mind</SelectItem>
+                                    <SelectItem value="Defective or damaged product">Defective or damaged product</SelectItem>
+                                    <SelectItem value="Wrong item purchased">Wrong item purchased</SelectItem>
+                                    <SelectItem value="Wrong item delivered">Wrong item delivered</SelectItem>
+                                    <SelectItem value="Product not as described">Product not as described</SelectItem>
+                                    <SelectItem value="Duplicate purchase">Duplicate purchase</SelectItem>
+                                    <SelectItem value="Price match or adjustment">Price match or adjustment</SelectItem>
+                                    <SelectItem value="Quality not satisfactory">Quality not satisfactory</SelectItem>
+                                    <SelectItem value="Expired or spoiled product">Expired or spoiled product</SelectItem>
+                                    <SelectItem value="OTHER">Other (specify below)</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            {reason === "OTHER" && (
+                                <Textarea
+                                    value={notes}
+                                    onChange={(e) => setNotes(e.target.value)}
+                                    placeholder="Please specify the reason..."
+                                    rows={2}
+                                    className="mt-2"
+                                />
                             )}
                         </div>
 
@@ -319,7 +359,7 @@ export function RefundDialog({ sale, open, onOpenChange, onSuccess }: RefundDial
                                     <span>MUR {subtotal.toFixed(2)}</span>
                                 </div>
                                 <div className="flex justify-between">
-                                    <span>Tax (15%):</span>
+                                    <span>Tax:</span>
                                     <span>MUR {tax.toFixed(2)}</span>
                                 </div>
                                 <div className="flex justify-between text-xl font-bold border-t pt-2">
@@ -336,7 +376,7 @@ export function RefundDialog({ sale, open, onOpenChange, onSuccess }: RefundDial
                         </Button>
                         <Button
                             onClick={handleSubmit}
-                            disabled={isProcessing || Object.keys(selectedItems).length === 0 || reason.length < 10}
+                            disabled={isProcessing || Object.keys(selectedItems).length === 0 || !reason || (reason === "OTHER" && (!notes || notes.trim().length < 5))}
                         >
                             <RotateCcw className="mr-2 h-4 w-4" />
                             Process Refund

@@ -47,9 +47,12 @@ export async function PUT(request: Request) {
     const supabase = await createClient()
     const data = await request.json()
 
+    console.log('[Settings API] PUT request received with data:', JSON.stringify(data))
+
     // Check authentication
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError || !user) {
+      console.log('[Settings API] Authentication failed:', authError)
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
@@ -61,15 +64,19 @@ export async function PUT(request: Request) {
       .single()
 
     if (!profile?.businessId) {
+      console.log('[Settings API] No businessId found for user:', user.id)
       return NextResponse.json({ error: 'Business not found' }, { status: 404 })
     }
 
     // Check permissions (OWNER or SUPER_ADMIN)
     if (profile.role !== 'OWNER' && profile.role !== 'SUPER_ADMIN') {
+      console.log('[Settings API] Insufficient permissions:', profile.role)
       return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
     }
 
-    const { error } = await supabase
+    console.log('[Settings API] Updating business:', profile.businessId)
+
+    const { data: updated, error } = await supabase
       .from('Business')
       .update({
         name: data.name,
@@ -82,14 +89,22 @@ export async function PUT(request: Request) {
         updatedAt: new Date().toISOString()
       })
       .eq('id', profile.businessId)
+      .select()
 
     if (error) {
+      console.error('[Settings API] Update error:', error)
       throw error
     }
 
+    if (!updated || updated.length === 0) {
+      console.error('[Settings API] No rows updated - businessId may not match')
+      return NextResponse.json({ error: 'Business not found or update failed' }, { status: 404 })
+    }
+
+    console.log('[Settings API] Update successful:', updated[0])
     return NextResponse.json({ success: true })
   } catch (error: any) {
-    console.error('Error updating settings:', error)
+    console.error('[Settings API] Error updating settings:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

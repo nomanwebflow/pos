@@ -93,7 +93,7 @@ export default function TransactionsPage() {
   const [filteredSales, setFilteredSales] = useState<Sale[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [barcodeInput, setBarcodeInput] = useState("")
-  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0])
+  const [startDate, setStartDate] = useState(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0])
   const [selectedSale, setSelectedSale] = useState<SaleDetail | null>(null)
   const [isDetailOpen, setIsDetailOpen] = useState(false)
@@ -121,7 +121,7 @@ export default function TransactionsPage() {
   const loadSales = async () => {
     setIsLoading(true)
     try {
-      const res = await fetch(`/api/sales-supabase?startDate=${startDate}&endDate=${endDate}`)
+      const res = await fetch(`/api/sales?startDate=${startDate}&endDate=${endDate}`)
       if (res.ok) {
         const data = await res.json()
         setSales(data.sales || [])
@@ -163,7 +163,7 @@ export default function TransactionsPage() {
 
   const viewSaleDetail = async (saleId: string) => {
     try {
-      const res = await fetch(`/api/sales-supabase?id=${saleId}`)
+      const res = await fetch(`/api/sales?id=${saleId}`)
       if (res.ok) {
         const data = await res.json()
         setSelectedSale(data)
@@ -176,7 +176,7 @@ export default function TransactionsPage() {
 
   const handleRefund = async (saleId: string) => {
     try {
-      const res = await fetch(`/api/sales-supabase?id=${saleId}`)
+      const res = await fetch(`/api/sales?id=${saleId}`)
       if (res.ok) {
         const data = await res.json()
 
@@ -417,15 +417,7 @@ export default function TransactionsPage() {
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Discount</CardTitle>
-                <Tag className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">MUR {totalDiscount.toFixed(2)}</div>
-              </CardContent>
-            </Card>
+
           </div>
 
           {/* Transactions Table */}

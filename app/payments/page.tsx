@@ -130,11 +130,11 @@ export default function PaymentsPage() {
     csv += "Method,Revenue,Transactions\n"
     csv += `Cash,MUR ${paymentData.overview.cashRevenue.toFixed(2)},${paymentData.overview.cashTransactions}\n`
     csv += `Card,MUR ${paymentData.overview.cardRevenue.toFixed(2)},${paymentData.overview.cardTransactions}\n`
-    csv += `Mixed,MUR ${paymentData.overview.mixedRevenue.toFixed(2)},${paymentData.overview.mixedTransactions}\n\n`
+    csv += `Internet Banking,MUR ${paymentData.overview.mixedRevenue.toFixed(2)},${paymentData.overview.mixedTransactions}\n\n`
 
     // Daily breakdown
     csv += "Daily Breakdown\n"
-    csv += "Date,Total Revenue,Cash,Card,Mixed,Transactions\n"
+    csv += "Date,Total Revenue,Cash,Card,Internet Banking,Transactions\n"
     paymentData.dailyBreakdown.forEach(day => {
       csv += `${day.date},MUR ${day.totalRevenue.toFixed(2)},MUR ${day.cashRevenue.toFixed(2)},MUR ${day.cardRevenue.toFixed(2)},MUR ${day.mixedRevenue.toFixed(2)},${day.totalTransactions}\n`
     })
@@ -303,7 +303,7 @@ export default function PaymentsPage() {
 
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Mixed Payments</CardTitle>
+                <CardTitle className="text-sm font-medium">Internet Banking</CardTitle>
                 <Wallet className="h-4 w-4 text-purple-600" />
               </CardHeader>
               <CardContent>
@@ -334,7 +334,7 @@ export default function PaymentsPage() {
                     <TableHead>Date</TableHead>
                     <TableHead className="text-right">Cash</TableHead>
                     <TableHead className="text-right">Card</TableHead>
-                    <TableHead className="text-right">Mixed</TableHead>
+                    <TableHead className="text-right">Internet Banking</TableHead>
                     <TableHead className="text-right">Total</TableHead>
                     <TableHead className="text-right">Transactions</TableHead>
                   </TableRow>
@@ -443,11 +443,11 @@ export default function PaymentsPage() {
             </CardContent>
           </Card>
 
-          {/* Mixed Payment Details */}
+          {/* Internet Banking Payment Details */}
           {paymentData?.mixedDetails && paymentData.mixedDetails.length > 0 && (
             <Card>
               <CardHeader>
-                <CardTitle>Mixed Payment Details</CardTitle>
+                <CardTitle>Internet Banking Payment Details</CardTitle>
                 <CardDescription>Split payments between cash and card</CardDescription>
               </CardHeader>
               <CardContent>
